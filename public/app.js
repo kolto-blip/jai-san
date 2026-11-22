@@ -522,4 +522,5 @@ $('#hw-form').addEventListener('submit', async (e) => {
   }
 });
 
+initInstall(document.querySelector('.wrap'));
 load();

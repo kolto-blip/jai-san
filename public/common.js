@@ -78,3 +78,73 @@ function confirmBox(text, okLabel = 'Иә, жою') {
     dlg.querySelector('[value=no]').focus();
   });
 }
+
+// ---------- Приложение (PWA) ----------
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+}
+
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+// Плашка «Орнату»: Android/компьютер — системное окно установки, iPhone — подсказка.
+function initInstall(container) {
+  if (isStandalone()) return;
+  let until = 0;
+  try { until = Number(localStorage.getItem('installHiddenUntil')) || 0; } catch {}
+  if (Date.now() < until) return;
+  let deferred = null;
+
+  const bar = document.createElement('div');
+  bar.className = 'install-bar';
+  bar.hidden = true;
+  bar.innerHTML = `<img src="/icons/icon-192.png" alt="" width="44" height="44">
+    <div class="ib-text"><b>Қолданба</b><small>Телефонға орнатыңыз</small></div>
+    <button class="btn btn-green btn-sm" type="button" data-ib="go">Орнату</button>
+    <button class="ib-x" type="button" data-ib="x" aria-label="Жабу">✕</button>`;
+  container.prepend(bar);
+
+  bar.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-ib]');
+    if (!b) return;
+    if (b.dataset.ib === 'x') {
+      bar.hidden = true;
+      try { localStorage.setItem('installHiddenUntil', String(Date.now() + 14 * 86400_000)); } catch {}
+      return;
+    }
+    if (deferred) {
+      deferred.prompt();
+      const { outcome } = await deferred.userChoice;
+      deferred = null;
+      if (outcome === 'accepted') bar.hidden = true;
+    } else if (isIOS()) {
+      iosHelp();
+    }
+  });
+
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    deferred = e;
+    bar.hidden = false;
+  });
+  window.addEventListener('appinstalled', () => (bar.hidden = true));
+  if (isIOS()) bar.hidden = false;
+}
+
+function iosHelp() {
+  const dlg = document.createElement('dialog');
+  dlg.innerHTML = `<div class="modal confirm ios-help">
+    <img src="/icons/icon-192.png" alt="" width="72" height="72">
+    <h2>iPhone-ға орнату</h2>
+    <ol>
+      <li>Safari-дің төменгі жағындағы <b>«Бөлісу»</b> батырмасын басыңыз <span class="ios-share" aria-hidden="true">⬆︎</span></li>
+      <li>Тізімнен <b>«Экранға қосу»</b> («На экран „Домой“») таңдаңыз</li>
+      <li>Жоғарғы оң жақтағы <b>«Қосу»</b> батырмасын басыңыз</li>
+    </ol>
+    <p class="hint">Қолданбада сынып кодын бір рет қайта енгізу керек болуы мүмкін.</p>
+    <div class="row"><button class="btn btn-green" type="button">Түсінікті</button></div></div>`;
+  document.body.appendChild(dlg);
+  dlg.querySelector('button').addEventListener('click', () => dlg.close());
+  dlg.addEventListener('close', () => dlg.remove());
+  dlg.showModal();
+}
