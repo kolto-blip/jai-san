@@ -109,3 +109,38 @@
 
 .span-all { grid-column: 1 / -1; }
 .upper::placeholder { text-transform: none; }
+
+/* Ключ ответов и результаты */
+.quiz-key { border: 2px solid var(--line); border-radius: 16px; background: #fbfaff; }
+.quiz-key summary { cursor: pointer; padding: 12px 14px; font-weight: 800; list-style-position: inside; }
+.quiz-key[open] summary { border-bottom: 2px solid var(--line); }
+.quiz-key.has-key { border-color: var(--green); }
+.quiz-key-body { padding: 14px; display: grid; gap: 14px; }
+@media (min-width: 760px) { .quiz-key-body { grid-template-columns: 1.4fr 1fr; } }
+.quiz-key textarea {
+  width: 100%; padding: 10px 14px; border-radius: 14px; border: 2px solid var(--line); background: var(--soft);
+  font-size: 18px; font-weight: 700; line-height: 1.5; resize: vertical;
+}
+.quiz-key textarea:focus { outline: none; border-color: var(--purple); background: #fff; }
+.quiz-opts { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.tag-quiz { background: #e9fbf1; color: var(--green-d); }
+
+.res { max-width: 1100px; margin: 0 auto; }
+.res-tools { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 12px; }
+.res-tools select { min-height: 44px; border-radius: 12px; border: 2px solid var(--line); padding: 4px 10px; background: #fff; }
+.res-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.res-summary .tag { font-size: 14px; padding: 4px 12px; }
+.res-wrap { overflow-x: auto; max-height: 60vh; border-radius: 14px; border: 2px solid var(--line); }
+.res-wrap table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.res-wrap th, .res-wrap td { padding: 8px 10px; border-bottom: 1px solid var(--line); text-align: center; white-space: nowrap; }
+.res-wrap th { position: sticky; top: 0; background: var(--soft); font-weight: 900; z-index: 1; }
+.res-wrap td.l, .res-wrap th.l { text-align: left; }
+.res-wrap tfoot td { font-weight: 900; background: var(--soft); position: sticky; bottom: 0; }
+.mk { font-weight: 900; }
+.mk.ok { color: var(--green-d); }
+.mk.no { color: var(--coral-d); }
+.res-wrap td small { display: block; color: var(--muted); font-size: 12px; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
+.score { font-weight: 900; }
+.pct-low { color: var(--coral-d); }
+.del-res { border: 0; background: none; cursor: pointer; font-size: 18px; min-width: 40px; min-height: 40px; }
+.res-empty { color: var(--muted); }

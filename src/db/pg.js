@@ -30,6 +30,17 @@ CREATE TABLE IF NOT EXISTS files (
   key text PRIMARY KEY,
   data bytea NOT NULL
 );
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS quiz jsonb;
+CREATE TABLE IF NOT EXISTS results (
+  id serial PRIMARY KEY,
+  material_id integer NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+  class_id integer NOT NULL,
+  name text NOT NULL,
+  name_key text NOT NULL,
+  answers jsonb NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS results_material ON results(material_id);
 CREATE TABLE IF NOT EXISTS settings (
   key text PRIMARY KEY,
   value text NOT NULL
@@ -52,14 +63,21 @@ const toMaterial = (r) =>
     allClasses: r.all_classes,
     classIds: r.class_ids,
     date: r.mdate,
+    quiz: r.quiz || null,
     createdAt: r.created_at,
   };
+const toResult = (r) => ({
+  id: r.id, materialId: r.material_id, classId: r.class_id, name: r.name, nameKey: r.name_key,
+  answers: r.answers, createdAt: r.created_at,
+});
 
 const COLS = {
   title: 'title', topic: 'topic', kind: 'kind', url: 'url', fileName: 'file_name', fileMime: 'file_mime',
   fileSize: 'file_size', storage: 'storage', storageKey: 'storage_key', allClasses: 'all_classes',
-  classIds: 'class_ids', date: 'mdate',
+  classIds: 'class_ids', date: 'mdate', quiz: 'quiz',
 };
+
+const val = (k, v) => (k === 'quiz' && v ? JSON.stringify(v) : v);
 
 export async function createPgRepo(connectionString) {
   // Neon даёт sslmode=require; pg и так проверяет сертификат полностью — пишем это явно, без предупреждения в логах.
@@ -133,7 +151,7 @@ export async function createPgRepo(connectionString) {
       const keys = Object.keys(COLS).filter((k) => m[k] !== undefined);
       const { rows } = await q(
         `INSERT INTO materials(${keys.map((k) => COLS[k]).join(',')}) VALUES(${keys.map((_, i) => '$' + (i + 1)).join(',')}) RETURNING *`,
-        keys.map((k) => m[k]),
+        keys.map((k) => val(k, m[k])),
       );
       return toMaterial(rows[0]);
     },
@@ -142,12 +160,37 @@ export async function createPgRepo(connectionString) {
       if (!keys.length) return this.getMaterial(id);
       const { rows } = await q(
         `UPDATE materials SET ${keys.map((k, i) => `${COLS[k]}=$${i + 2}`).join(',')} WHERE id=$1 RETURNING *`,
-        [id, ...keys.map((k) => patch[k])],
+        [id, ...keys.map((k) => val(k, patch[k]))],
       );
       return toMaterial(rows[0]) || null;
     },
     async deleteMaterial(id) {
       await q('DELETE FROM materials WHERE id=$1', [id]);
+    },
+    async listResults(materialId) {
+      const { rows } = await q('SELECT * FROM results WHERE material_id=$1 ORDER BY created_at', [materialId]);
+      return rows.map(toResult);
+    },
+    async countResults() {
+      const { rows } = await q('SELECT material_id, COUNT(*)::int AS n FROM results GROUP BY material_id');
+      return Object.fromEntries(rows.map((r) => [r.material_id, r.n]));
+    },
+    async hasResult(materialId, classId, nameKey) {
+      const { rows } = await q('SELECT 1 FROM results WHERE material_id=$1 AND class_id=$2 AND name_key=$3 LIMIT 1', [materialId, classId, nameKey]);
+      return rows.length > 0;
+    },
+    async createResult(r) {
+      const { rows } = await q(
+        'INSERT INTO results(material_id,class_id,name,name_key,answers) VALUES($1,$2,$3,$4,$5) RETURNING *',
+        [r.materialId, r.classId, r.name, r.nameKey, JSON.stringify(r.answers)],
+      );
+      return toResult(rows[0]);
+    },
+    async deleteResult(id) {
+      await q('DELETE FROM results WHERE id=$1', [id]);
+    },
+    async deleteResults(materialId) {
+      await q('DELETE FROM results WHERE material_id=$1', [materialId]);
     },
     async usageBytes() {
       const { rows } = await q('SELECT COALESCE(SUM(file_size),0)::bigint AS s FROM materials WHERE storage IS NOT NULL');

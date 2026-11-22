@@ -5,9 +5,10 @@ import path from 'node:path';
 export async function createJsonRepo(dataDir) {
   await fs.mkdir(dataDir, { recursive: true });
   const file = path.join(dataDir, 'db.json');
-  let state = { seq: { classes: 0, materials: 0 }, classes: [], materials: [], settings: {} };
+  let state = { seq: { classes: 0, materials: 0, results: 0 }, classes: [], materials: [], results: [], settings: {} };
   try {
-    state = { ...state, ...JSON.parse(await fs.readFile(file, 'utf8')) };
+    const loaded = JSON.parse(await fs.readFile(file, 'utf8'));
+    state = { ...state, ...loaded, seq: { ...state.seq, ...loaded.seq } };
   } catch (e) {
     if (e.code !== 'ENOENT') throw e;
   }
@@ -85,7 +86,7 @@ export async function createJsonRepo(dataDir) {
         fileName: m.fileName ?? null, fileMime: m.fileMime ?? null, fileSize: m.fileSize || 0,
         storage: m.storage ?? null, storageKey: m.storageKey ?? null,
         allClasses: Boolean(m.allClasses), classIds: m.classIds || [],
-        date: m.date, createdAt: new Date().toISOString(),
+        date: m.date, quiz: m.quiz ?? null, createdAt: new Date().toISOString(),
       };
       state.materials.push(rec);
       await save();
@@ -100,6 +101,32 @@ export async function createJsonRepo(dataDir) {
     },
     async deleteMaterial(id) {
       state.materials = state.materials.filter((m) => m.id !== id);
+      state.results = state.results.filter((r) => r.materialId !== id);
+      await save();
+    },
+    async listResults(materialId) {
+      return clone(state.results.filter((r) => r.materialId === materialId));
+    },
+    async countResults() {
+      const out = {};
+      for (const r of state.results) out[r.materialId] = (out[r.materialId] || 0) + 1;
+      return out;
+    },
+    async hasResult(materialId, classId, nameKey) {
+      return state.results.some((r) => r.materialId === materialId && r.classId === classId && r.nameKey === nameKey);
+    },
+    async createResult(r) {
+      const rec = { id: ++state.seq.results, ...r, createdAt: new Date().toISOString() };
+      state.results.push(rec);
+      await save();
+      return clone(rec);
+    },
+    async deleteResult(id) {
+      state.results = state.results.filter((r) => r.id !== id);
+      await save();
+    },
+    async deleteResults(materialId) {
+      state.results = state.results.filter((r) => r.materialId !== materialId);
       await save();
     },
     async usageBytes() {

@@ -37,6 +37,7 @@ export async function seed(repo, storages, log = console.log) {
     { title: 'Дәреже қасиеттері — конспект', topic: 'Дәреже', date: daysAgo(2), classIds: [cls['8Ғ'].id],
       ...(await fileFields('Дәреже_қасиеттері_конспект.pdf')) },
     { title: 'Сызықтық теңдеулер — үй тапсырмасы №3', topic: 'Теңдеулер', date: daysAgo(1), classIds: [cls['7Ә'].id],
+      quiz: { answers: ['5', '3', '9', '5', '150'], open: true, retry: false, show: false },
       ...(await fileFields('Теңдеулер_үй_тапсырмасы_№3.docx')) },
     { title: 'Квадраттық функция — презентация', topic: 'Функциялар', date: daysAgo(12), classIds: [cls['9А'].id],
       ...(await fileFields('Квадраттық_функция.pptx')) },

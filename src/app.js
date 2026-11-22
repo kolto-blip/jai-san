@@ -9,6 +9,7 @@ import { openRepo } from './db/index.js';
 import { createStorages } from './storage/index.js';
 import { createAuth, adminMode } from './auth.js';
 import { FailureLimiter } from './ratelimit.js';
+import { grade, nameKey } from './grade.js';
 import {
   HttpError, readBody, readJson, sendJson, parseCookies, cookie, clientIp, generateCode, normalizeCode,
   validManualCode, FILE_TYPES, fileExt, cleanFileName, contentDisposition, safeHttpUrl, youtubeId, todayISO,
@@ -44,6 +45,8 @@ export async function createApp() {
   const auth = await createAuth(repo);
   const codeLimiter = new FailureLimiter(config.rateLimit.codeFailures, config.rateLimit.windowMs);
   const pinLimiter = new FailureLimiter(config.rateLimit.pinFailures, config.rateLimit.windowMs);
+  // ответы учеников: не больше 120 отправок за 10 минут с одного IP (весь класс за одним школьным IP)
+  const submitLimiter = new FailureLimiter(Number(process.env.SUBMIT_MAX) || 120, 10 * 60 * 1000);
 
   // ---------- вспомогательное ----------
   async function studentClass(req) {
@@ -93,11 +96,29 @@ export async function createApp() {
       out.url = m.url;
       out.action = 'link';
     }
+    if (m.quiz?.answers?.length) {
+      // сами ответы ученикам не отдаём
+      out.quiz = { count: m.quiz.answers.length, open: m.quiz.open, retry: m.quiz.retry };
+    }
     return out;
   }
 
-  function adminMaterial(m) {
-    return { ...publicMaterial(m), allClasses: m.allClasses, classIds: m.classIds, storage: m.storage };
+  function adminMaterial(m, resultCounts = {}) {
+    return {
+      ...publicMaterial(m), allClasses: m.allClasses, classIds: m.classIds, storage: m.storage,
+      quizKey: m.quiz || null, results: resultCounts[m.id] || 0,
+    };
+  }
+
+  function parseQuiz(q) {
+    if (!q) return null;
+    const answers = (Array.isArray(q.answers) ? q.answers : String(q.answers || '').split('\n'))
+      .map((a) => String(a).trim().slice(0, 100));
+    while (answers.length && !answers[answers.length - 1]) answers.pop();
+    if (!answers.length) return null;
+    if (answers.length > 50) throw new HttpError(400, 'Жауап кілтінде 50-ден көп жол болмауы керек');
+    if (answers.some((a) => !a)) throw new HttpError(400, 'Жауап кілтінде бос жол бар');
+    return { answers, open: q.open !== false, retry: Boolean(q.retry), show: Boolean(q.show) };
   }
 
   // Общие поля материала из формы учителя.
@@ -113,6 +134,7 @@ export async function createApp() {
     if (!allClasses && !classIds.length) throw new HttpError(400, 'Кем дегенде бір сыныпты таңдаңыз');
 
     const fields = { title, topic, date, allClasses, classIds };
+    if (input.quiz !== undefined) fields.quiz = parseQuiz(input.quiz);
     if (!isFile) {
       const type = input.type || (existing && (existing.kind === 'pres' ? 'slides' : existing.kind));
       const url = safeHttpUrl(input.url ?? existing?.url);
@@ -254,12 +276,14 @@ export async function createApp() {
 
   route('GET', /^\/api\/admin\/overview$/, async (req, res) => {
     requireAdmin(req);
-    const [classes, materials, used] = await Promise.all([repo.listClasses(), repo.listMaterials(), repo.usageBytes()]);
+    const [classes, materials, used, resultCounts] = await Promise.all([
+      repo.listClasses(), repo.listMaterials(), repo.usageBytes(), repo.countResults(),
+    ]);
     const counts = {};
     for (const m of materials) for (const id of m.classIds) counts[id] = (counts[id] || 0) + 1;
     sendJson(res, 200, {
       classes: classes.map((c) => ({ ...c, materials: counts[c.id] || 0 })),
-      materials: materials.map(adminMaterial),
+      materials: materials.map((m) => adminMaterial(m, resultCounts)),
       usage: { usedBytes: used, limitMb: storages.limitMb, storage: storages.active.name, maxFileMb: config.maxFileBytes / 1048576 },
       baseUrl: baseUrl(req),
     });
@@ -362,6 +386,85 @@ export async function createApp() {
       await repo.deleteMaterial(m.id);
       await removeFile(m);
     }
+    sendJson(res, 200, { ok: true });
+  });
+
+  // ---------- Ответы с автопроверкой ----------
+  route('POST', /^\/api\/quiz\/(\d+)$/, async (req, res, [id]) => {
+    const ip = clientIp(req);
+    if (submitLimiter.isBlocked(ip)) return tooMany(res, submitLimiter, ip);
+    const cls = await studentClass(req);
+    if (!cls) return sendJson(res, 401, { error: 'Сынып кодын енгізіңіз' });
+    const m = await repo.getMaterial(Number(id));
+    if (!m || !(m.allClasses || m.classIds.includes(cls.id)) || !m.quiz) throw new HttpError(404, 'Тапсырма табылмады');
+    if (!m.quiz.open) throw new HttpError(403, 'Жауап қабылдау жабылды');
+    const body = await readJson(req);
+    const name = String(body.name || '').normalize('NFC').trim().replace(/\s+/g, ' ').slice(0, 60);
+    if (name.length < 3) throw new HttpError(400, 'Аты-жөніңізді толық жазыңыз');
+    const answers = m.quiz.answers.map((_, i) => String(body.answers?.[i] ?? '').trim().slice(0, 100));
+    if (answers.every((a) => !a)) throw new HttpError(400, 'Кем дегенде бір жауап жазыңыз');
+    const key = nameKey(name);
+    if (!m.quiz.retry && (await repo.hasResult(m.id, cls.id, key))) {
+      throw new HttpError(409, 'Бұл есіммен жауап тапсырылған. Қайта тапсыруға мұғалім рұқсат бермеген.');
+    }
+    submitLimiter.fail(ip); // считаем каждую отправку
+    await repo.createResult({ materialId: m.id, classId: cls.id, name, nameKey: key, answers });
+    const g = grade(answers, m.quiz.answers);
+    sendJson(res, 200, { ...g, correct: m.quiz.show ? m.quiz.answers : undefined });
+  });
+
+  async function resultsTable(materialId) {
+    const m = await repo.getMaterial(materialId);
+    if (!m) throw new HttpError(404, 'Материал табылмады');
+    const key = m.quiz?.answers || [];
+    const names = Object.fromEntries((await repo.listClasses()).map((c) => [c.id, c.name]));
+    // ключ мог измениться — оцениваем заново при каждом просмотре
+    const results = (await repo.listResults(m.id)).map((r) => ({
+      id: r.id, name: r.name, className: names[r.classId] || '—', classId: r.classId,
+      answers: r.answers, createdAt: r.createdAt, ...grade(r.answers, key),
+    }));
+    // номер попытки для одного и того же ученика
+    const seen = {};
+    for (const r of results) r.attempt = seen[r.classId + '|' + nameKey(r.name)] = (seen[r.classId + '|' + nameKey(r.name)] || 0) + 1;
+    return { material: { id: m.id, title: m.title }, key, results };
+  }
+
+  route('GET', /^\/api\/admin\/materials\/(\d+)\/results$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    sendJson(res, 200, await resultsTable(Number(id)));
+  });
+
+  route('GET', /^\/api\/admin\/materials\/(\d+)\/results\.csv$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    const t = await resultsTable(Number(id));
+    const cell = (v) => {
+      let s = String(v ?? '');
+      if (/^[=+\-@]/.test(s)) s = "'" + s; // защита от формул в Excel
+      return '"' + s.replace(/"/g, '""') + '"';
+    };
+    const head = ['Сынып', 'Аты-жөні', 'Ұпай', 'Барлығы', 'Әрекет', 'Уақыт', ...t.key.map((_, i) => `№${i + 1}`)];
+    const rows = t.results.map((r) => [
+      r.className, r.name, r.score, r.total, r.attempt, new Date(r.createdAt).toLocaleString('ru-RU', { timeZone: config.timeZone }),
+      ...r.answers.map((a, i) => `${r.marks[i] ? '✓' : '✗'} ${a}`),
+    ]);
+    const csv = '\ufeff' + [head, ...rows].map((row) => row.map(cell).join(';')).join('\r\n');
+    res.writeHead(200, {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': contentDisposition('attachment', `${t.material.title} — нәтижелер.csv`.replace(/[\\/:*?"<>|]/g, '_')),
+      'Cache-Control': 'no-store',
+    });
+    res.end(csv);
+  });
+
+  route('DELETE', /^\/api\/admin\/results\/(\d+)$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    await repo.deleteResult(Number(id));
+    sendJson(res, 200, { ok: true });
+  });
+
+  route('DELETE', /^\/api\/admin\/materials\/(\d+)\/results$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    await repo.deleteResults(Number(id));
     sendJson(res, 200, { ok: true });
   });
 

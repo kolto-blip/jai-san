@@ -135,7 +135,7 @@ function card(m) {
       <h3>${esc(m.title)}${m.isNew ? '<span class="badge-new">Жаңа</span>' : ''}</h3>
       <div class="meta"><span class="kind-name">${k.name}</span><span>${esc(m.topic)}</span><span>${fmtDate(m.date)}</span>${extra}</div>
     </div>
-    <div class="actions">${action}</div>
+    <div class="actions">${action}${quizBlock(m)}</div>
   </article>`;
 }
 
@@ -171,5 +171,85 @@ const closeVideo = () => {
 $('#video-close').addEventListener('click', closeVideo);
 dlg.addEventListener('close', () => ($('#video-box').innerHTML = ''));
 dlg.addEventListener('click', (e) => e.target === dlg && closeVideo());
+
+// ---------- Ответы с автопроверкой ----------
+const local = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
+};
+
+function quizBlock(m) {
+  if (!m.quiz) return '';
+  const done = local.get('quiz:' + m.id);
+  if (done) {
+    const again = m.quiz.retry && m.quiz.open ? `<button class="btn btn-light btn-sm" type="button" data-quiz="${m.id}">Қайта</button>` : '';
+    return `<div class="quiz-done">✅ Тапсырылды: ${done.score}/${done.total}${again}</div>`;
+  }
+  if (!m.quiz.open) return '<div class="quiz-done">🔒 Жауап қабылдау жабылды</div>';
+  return `<button class="btn btn-quiz" type="button" data-quiz="${m.id}">✏️ Жауап беру · ${m.quiz.count} есеп</button>`;
+}
+
+const quizDlg = $('#quiz-dlg');
+let quizMat = null;
+
+function openQuiz(m) {
+  quizMat = m;
+  $('#quiz-title').textContent = m.title;
+  $('#quiz-name').value = local.get('studentName') || '';
+  $('#quiz-inputs').innerHTML = Array.from({ length: m.quiz.count }, (_, i) =>
+    `<label class="quiz-item"><span>№${i + 1}</span><input class="quiz-input" data-i="${i}" maxlength="100" inputmode="text" autocapitalize="off" spellcheck="false"></label>`,
+  ).join('');
+  $('#quiz-error').textContent = '';
+  $('#quiz-body').hidden = false;
+  $('#quiz-result').hidden = true;
+  quizDlg.showModal();
+  ($('#quiz-name').value ? $('#quiz-inputs input') : $('#quiz-name')).focus();
+}
+
+$('#list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-quiz]');
+  if (b) openQuiz(state.materials.find((x) => String(x.id) === b.dataset.quiz));
+});
+$('#quiz-close').addEventListener('click', () => quizDlg.close());
+
+$('#quiz-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const name = $('#quiz-name').value.trim();
+  const answers = [...document.querySelectorAll('#quiz-inputs input')].map((i) => i.value.trim());
+  const err = $('#quiz-error');
+  if (name.length < 3) return (err.textContent = 'Аты-жөніңізді жазыңыз'), $('#quiz-name').focus();
+  const empty = answers.filter((a) => !a).length;
+  if (empty === answers.length) return (err.textContent = 'Жауаптарды жазыңыз');
+  if (empty && !(await confirmBox(`${empty} есепке жауап жазылмады. Солай жібере берейін бе?`, 'Иә, жіберу'))) return;
+  const btn = $('#quiz-submit');
+  btn.disabled = true;
+  try {
+    const r = await api(`/api/quiz/${quizMat.id}`, { method: 'POST', body: { name, answers } });
+    local.set('studentName', name);
+    local.set('quiz:' + quizMat.id, { score: r.score, total: r.total });
+    showQuizResult(r, answers);
+    renderList();
+  } catch (e2) {
+    err.textContent = e2.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function showQuizResult(r, answers) {
+  const pct = r.score / r.total;
+  const cls = pct >= 0.8 ? '' : pct >= 0.5 ? 'mid' : 'low';
+  const praise = pct === 1 ? 'Керемет! Бәрі дұрыс 🎉' : pct >= 0.8 ? 'Жарайсың! 👏' : pct >= 0.5 ? 'Жаман емес, қателерді қара 💪' : 'Тақырыпты қайталап шық 📚';
+  $('#quiz-result').innerHTML = `
+    <div class="quiz-score"><div class="big ${cls}">${r.score}/${r.total}</div><div><b>${praise}</b></div></div>
+    <div class="quiz-marks">${r.marks.map((ok, i) => `<div class="quiz-mark ${ok ? '' : 'bad'}">№${i + 1} ${ok ? '✅' : '❌'}
+      <small>Сіз: ${esc(answers[i] || '—')}${!ok && r.correct ? ` · Дұрысы: ${esc(r.correct[i])}` : ''}</small></div>`).join('')}</div>
+    <div class="row">${quizMat.quiz.retry ? '<button class="btn btn-blue" type="button" id="quiz-again">Қайта тапсыру</button>' : ''}
+      <button class="btn btn-light" type="button" id="quiz-ok">Жабу</button></div>`;
+  $('#quiz-body').hidden = true;
+  $('#quiz-result').hidden = false;
+  $('#quiz-ok').addEventListener('click', () => quizDlg.close());
+  $('#quiz-again')?.addEventListener('click', () => openQuiz(quizMat));
+}
 
 load();

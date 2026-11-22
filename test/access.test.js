@@ -220,6 +220,59 @@ function suite(label, makeEnv) {
       assert.match(await qr.text(), /<svg/);
     });
 
+    test('ответы с автопроверкой: проверка на сервере, ключ не утекает', async () => {
+      const id = mats[DOCX_7A].id; // ключ: 5, 3, 9, 5, 150
+      const s = client(srv.base);
+      await s.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
+      const list = await (await s.req('/api/materials')).json();
+      const pub = list.materials.find((m) => m.id === id);
+      assert.deepEqual(pub.quiz, { count: 5, open: true, retry: false });
+      assert.ok(!JSON.stringify(list).includes('150'), 'правильные ответы не отдаются ученику');
+
+      const r = await s.req(`/api/quiz/${id}`, { method: 'POST', json: { name: ' Әлия  Серікқызы ', answers: ['5', '3,0', 'x = 9', '4', '150'] } });
+      assert.equal(r.status, 200);
+      const g = await r.json();
+      assert.equal(g.score, 4);
+      assert.deepEqual(g.marks, [true, true, true, false, true]);
+      assert.equal(g.correct, undefined, 'без разрешения учителя правильные ответы не показываются');
+
+      const again = await s.req(`/api/quiz/${id}`, { method: 'POST', json: { name: 'әлия серікқызы', answers: ['5'] } });
+      assert.equal(again.status, 409, 'пересдача под тем же именем запрещена');
+
+      // другой класс не может отвечать на задание 7Ә
+      const s8 = client(srv.base);
+      await s8.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      assert.equal((await s8.req(`/api/quiz/${id}`, { method: 'POST', json: { name: 'Чужой ученик', answers: ['5'] } })).status, 404);
+      assert.equal((await fetch(`${srv.base}/api/quiz/${id}`, { method: 'POST', body: '{}' })).status, 401);
+
+      // учитель видит результат; исправленный ключ пересчитывает оценку
+      const a = admin();
+      await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      let t = await (await a.req(`/api/admin/materials/${id}/results`)).json();
+      assert.equal(t.results.length, 1);
+      assert.equal(t.results[0].name, 'Әлия Серікқызы');
+      assert.equal(t.results[0].score, 4);
+      const upd = await a.req(`/api/admin/materials/${id}`, {
+        method: 'PUT', json: { quiz: { answers: ['5', '3', '9', '4 | 5', '150'], open: true, retry: true, show: true } },
+      });
+      assert.equal(upd.status, 200);
+      t = await (await a.req(`/api/admin/materials/${id}/results`)).json();
+      assert.equal(t.results[0].score, 5);
+
+      const csv = await a.req(`/api/admin/materials/${id}/results.csv`);
+      const bytes = Buffer.from(await csv.arrayBuffer());
+      assert.deepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf], 'BOM для Excel');
+      const text = bytes.toString('utf8');
+      assert.match(text, /Әлия Серікқызы/);
+
+      // пересдача разрешена, правильные ответы показываются; закрытое задание не принимает ответы
+      const r2 = await (await s.req(`/api/quiz/${id}`, { method: 'POST', json: { name: 'Әлия Серікқызы', answers: ['1'] } })).json();
+      assert.deepEqual(r2.correct, ['5', '3', '9', '4 | 5', '150']);
+      await a.req(`/api/admin/materials/${id}`, { method: 'PUT', json: { quiz: { answers: ['5'], open: false } } });
+      assert.equal((await s.req(`/api/quiz/${id}`, { method: 'POST', json: { name: 'Әлия Серікқызы', answers: ['5'] } })).status, 403);
+      assert.equal((await a.req(`/api/admin/materials/${id}/results`, { method: 'DELETE' })).status, 200);
+    });
+
     test('подбор кода класса блокируется по IP', async () => {
       const s = client(srv.base);
       let last;
@@ -247,8 +300,11 @@ if (process.env.TEST_DATABASE_URL) {
   suite('Postgres', async () => {
     const c = new pg.Client(process.env.TEST_DATABASE_URL);
     await c.connect();
-    await c.query('DROP TABLE IF EXISTS classes, materials, files, settings');
-    await c.end();
+    try {
+      await c.query('DROP TABLE IF EXISTS results, classes, materials, files, settings CASCADE');
+    } finally {
+      await c.end();
+    }
     return { DATABASE_URL: process.env.TEST_DATABASE_URL, DATA_DIR: fs.mkdtempSync(path.join(os.tmpdir(), 'mat-')) };
   });
 }

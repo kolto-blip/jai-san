@@ -255,6 +255,8 @@ function resetForm() {
   setType('file');
   setFile(null);
   syncAllClasses();
+  $('#quiz-key').open = false;
+  $('#quiz-key').classList.remove('has-key');
 }
 $('#mat-cancel').addEventListener('click', resetForm);
 
@@ -273,6 +275,14 @@ function editMaterial(m) {
   $('#topic').value = m.topic;
   $('#date').value = m.date;
   $('#all-classes').checked = m.allClasses;
+  if (m.quizKey) {
+    $('#quiz-answers').value = m.quizKey.answers.join('\n');
+    $('#quiz-open').checked = m.quizKey.open;
+    $('#quiz-retry').checked = m.quizKey.retry;
+    $('#quiz-show').checked = m.quizKey.show;
+    $('#quiz-key').open = true;
+    $('#quiz-key').classList.add('has-key');
+  }
   document.querySelectorAll('#class-picks input').forEach((i) => (i.checked = m.classIds.includes(Number(i.value))));
   syncAllClasses();
   $('#mat-form').scrollIntoView({ behavior: 'smooth' });
@@ -286,7 +296,14 @@ function formMeta() {
     date: $('#date').value || today(),
     allClasses: $('#all-classes').checked,
     classIds: [...document.querySelectorAll('#class-picks input:checked')].map((i) => Number(i.value)),
+    quiz: quizMeta(),
   };
+}
+
+function quizMeta() {
+  const answers = $('#quiz-answers').value.split('\n').map((a) => a.trim()).filter(Boolean);
+  if (!answers.length) return null;
+  return { answers, open: $('#quiz-open').checked, retry: $('#quiz-retry').checked, show: $('#quiz-show').checked };
 }
 
 function upload(url, method, file, meta) {
@@ -375,9 +392,10 @@ function renderMaterials() {
         <div><h3>${esc(m.title)}${m.isNew ? '<span class="badge-new">Жаңа</span>' : ''}</h3>
           <div class="meta"><span class="kind-name">${k.name}</span><span>${esc(m.topic)}</span><span>${fmtDate(m.date)}</span>
           ${m.file ? `<span>${esc(m.file.name)} · ${fmtSize(m.file.size)}</span>` : ''}</div>
-          <div class="meta">${tags}</div></div>
+          <div class="meta">${tags}${m.quizKey ? ` <span class="tag tag-quiz">✏️ ${m.quizKey.answers.length} есеп${m.quizKey.open ? '' : ' · жабық'}</span>` : ''}</div></div>
         <div class="btns">
           <a class="btn btn-light btn-sm" href="${esc(open)}" target="_blank" rel="noopener">Ашу</a>
+          ${m.quizKey ? `<button class="btn btn-green btn-sm" data-act="results">📊 Нәтижелер (${m.results})</button>` : ''}
           <button class="btn btn-blue btn-sm" data-act="edit">✏️ Өзгерту</button>
           <button class="btn btn-coral btn-sm" data-act="del">🗑 Жою</button>
         </div></div>`;
@@ -392,6 +410,7 @@ $('#mat-list').addEventListener('click', async (e) => {
   if (!b) return;
   const m = S.materials.find((x) => x.id === Number(b.closest('[data-id]').dataset.id));
   if (b.dataset.act === 'edit') return editMaterial(m);
+  if (b.dataset.act === 'results') return openResults(m);
   if (!(await confirmBox(`«${m.title}» материалы жойылады. Оны қайтару мүмкін емес.`))) return;
   try {
     await api(`/api/admin/materials/${m.id}`, { method: 'DELETE' });
@@ -401,6 +420,79 @@ $('#mat-list').addEventListener('click', async (e) => {
   } catch (err) {
     toast(err.message, true);
   }
+});
+
+// ---------- Результаты ----------
+const R = { data: null, mat: null };
+const resDlg = $('#res-dlg');
+
+async function openResults(m) {
+  R.mat = m;
+  $('#res-title').textContent = `📊 ${m.title}`;
+  $('#res-csv').href = `/api/admin/materials/${m.id}/results.csv`;
+  try {
+    R.data = await api(`/api/admin/materials/${m.id}/results`);
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const classIds = [...new Set(R.data.results.map((r) => r.classId))];
+  $('#res-class').innerHTML = '<option value="">Барлық сыныптар</option>' +
+    classIds.map((id) => `<option value="${id}">${esc(R.data.results.find((r) => r.classId === id).className)}</option>`).join('');
+  renderResults();
+  if (!resDlg.open) resDlg.showModal();
+}
+
+function renderResults() {
+  const { key, results } = R.data;
+  const cf = Number($('#res-class').value) || 0;
+  let rows = results.filter((r) => !cf || r.classId === cf);
+  if ($('#res-last').checked) {
+    const last = new Map();
+    for (const r of rows) last.set(r.classId + '|' + r.name.toLocaleLowerCase('kk'), r);
+    rows = [...last.values()];
+  }
+  rows.sort((a, b) => a.className.localeCompare(b.className, 'kk') || a.name.localeCompare(b.name, 'kk') || a.attempt - b.attempt);
+
+  if (!rows.length) {
+    $('#res-summary').innerHTML = '';
+    $('#res-table').innerHTML = '<div class="empty res-empty"><div class="big-emoji">📭</div>Әзірге жауап жоқ</div>';
+    return;
+  }
+  const avg = rows.reduce((s, r) => s + r.score / r.total, 0) / rows.length;
+  const full = rows.filter((r) => r.score === r.total).length;
+  $('#res-summary').innerHTML = `<span class="tag">Жауап берді: ${rows.length}</span>
+    <span class="tag">Орташа: ${Math.round(avg * 100)}%</span><span class="tag tag-quiz">Бәрі дұрыс: ${full}</span>`;
+
+  const pct = key.map((_, i) => Math.round((rows.filter((r) => r.marks[i]).length / rows.length) * 100));
+  const fmtTime = (t) => new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  $('#res-table').innerHTML = `<table>
+    <thead><tr><th class="l">Сынып</th><th class="l">Аты-жөні</th><th>Ұпай</th>${key.map((k, i) => `<th title="Жауабы: ${esc(k)}">№${i + 1}</th>`).join('')}<th>Уақыт</th><th></th></tr></thead>
+    <tbody>${rows.map((r) => `<tr>
+      <td class="l">${esc(r.className)}</td>
+      <td class="l">${esc(r.name)}${r.attempt > 1 ? ` <span class="tag">${r.attempt}-әрекет</span>` : ''}</td>
+      <td class="score">${r.score}/${r.total}</td>
+      ${r.marks.map((ok, i) => `<td><span class="mk ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'}</span><small title="${esc(r.answers[i])}">${esc(r.answers[i] || '—')}</small></td>`).join('')}
+      <td>${fmtTime(r.createdAt)}</td>
+      <td><button class="del-res" data-res="${r.id}" title="Жою">🗑</button></td></tr>`).join('')}</tbody>
+    <tfoot><tr><td class="l" colspan="3">Дұрыс шығарғандар</td>${pct.map((p) => `<td class="${p < 50 ? 'pct-low' : ''}">${p}%</td>`).join('')}<td colspan="2"></td></tr></tfoot>
+  </table>`;
+}
+
+$('#res-class').addEventListener('change', renderResults);
+$('#res-last').addEventListener('change', renderResults);
+$('#res-close').addEventListener('click', () => resDlg.close());
+resDlg.addEventListener('close', () => refresh().catch(() => {}));
+$('#res-table').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-res]');
+  if (!b) return;
+  if (!(await confirmBox('Бұл жауап жойылады.'))) return;
+  await api(`/api/admin/results/${b.dataset.res}`, { method: 'DELETE' }).catch((err) => toast(err.message, true));
+  openResults(R.mat);
+});
+$('#res-clear').addEventListener('click', async () => {
+  if (!(await confirmBox(`«${R.mat.title}» бойынша барлық жауаптар жойылады.`))) return;
+  await api(`/api/admin/materials/${R.mat.id}/results`, { method: 'DELETE' }).catch((err) => toast(err.message, true));
+  openResults(R.mat);
 });
 
 resetForm();

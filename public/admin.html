@@ -105,6 +105,23 @@
             <div id="class-picks"></div>
           </fieldset>
 
+          <details class="quiz-key" id="quiz-key">
+            <summary>✏️ Жауап кілті — оқушылар жауап береді, сайт өзі тексереді <span class="hint">(міндетті емес)</span></summary>
+            <div class="quiz-key-body">
+              <div>
+                <label for="quiz-answers">Әр жолға бір есептің жауабы</label>
+                <textarea id="quiz-answers" rows="6" placeholder="5&#10;-3,5&#10;2; -3&#10;0,5 | 1/2"></textarea>
+                <p class="hint"><b>3,5</b> = 3.5 = 7/2 деп те қабылданады; <b>x = 5</b> = 5.
+                  Бірнеше түбір — нүктелі үтірмен (<b>2; -3</b>, ретсіз). Бірнеше дұрыс нұсқа — тік сызықпен (<b>0,5 | 1/2</b>).</p>
+              </div>
+              <div class="quiz-opts">
+                <label class="pick"><input type="checkbox" id="quiz-open" checked><span>Жауап қабылдау ашық</span></label>
+                <label class="pick"><input type="checkbox" id="quiz-retry"><span>Қайта тапсыруға болады</span></label>
+                <label class="pick"><input type="checkbox" id="quiz-show"><span>Кейін дұрыс жауаптарды көрсету</span></label>
+              </div>
+            </div>
+          </details>
+
           <div class="progress" id="progress" hidden><div id="progress-fill"></div></div>
           <div class="form-error" id="mat-error" role="alert"></div>
           <button class="btn btn-green" type="submit" id="mat-submit">💾 Сақтау</button>
@@ -149,6 +166,23 @@
         <button class="btn btn-purple" value="ok" type="submit">Сақтау</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="res-dlg">
+    <div class="modal res">
+      <div class="modal-head">
+        <h2 id="res-title">Нәтижелер</h2>
+        <button class="btn btn-coral btn-sm" id="res-close" type="button">Жабу ✕</button>
+      </div>
+      <div class="res-tools">
+        <select id="res-class" aria-label="Сынып"></select>
+        <label class="pick"><input type="checkbox" id="res-last" checked><span>Тек соңғы әрекет</span></label>
+        <a class="btn btn-green btn-sm" id="res-csv" href="#">⬇ Excel (CSV)</a>
+        <button class="btn btn-light btn-sm" id="res-clear" type="button">🗑 Барлығын жою</button>
+      </div>
+      <div class="res-summary" id="res-summary"></div>
+      <div class="res-wrap" id="res-table"></div>
+    </div>
   </dialog>
 
   <script src="/common.js"></script>
