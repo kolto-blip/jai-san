@@ -384,7 +384,7 @@ export async function createApp() {
     };
     if (ext === '.html') {
       headers['Content-Security-Policy'] = PAGE_CSP;
-      headers['Referrer-Policy'] = 'same-origin';
+      headers['Referrer-Policy'] = 'strict-origin-when-cross-origin'; // YouTube требует Referer (иначе ошибка 153)
     }
     res.writeHead(200, headers);
     res.end(req.method === 'HEAD' ? undefined : data);

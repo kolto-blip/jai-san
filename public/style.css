@@ -211,6 +211,7 @@ img, svg { max-width: 100%; }
 
 /* ===== Модальные окна ===== */
 dialog {
+  margin: auto; inset: 0;
   border: 0; padding: 0; background: transparent; max-width: min(960px, calc(100vw - 24px)); width: 100%;
 }
 dialog::backdrop { background: rgb(20 10 50 / .8); }
@@ -219,6 +220,7 @@ dialog::backdrop { background: rgb(20 10 50 / .8); }
 .modal-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .modal-head h2 { margin: 0; flex: 1; font-size: 19px; overflow-wrap: anywhere; }
 .video-box { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 14px; overflow: hidden; }
+.video-yt { margin-top: 12px; width: 100%; }
 .video-box iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .confirm { max-width: 400px; margin: 0 auto; text-align: center; }
 .confirm .row { display: flex; gap: 12px; justify-content: center; margin-top: 16px; }

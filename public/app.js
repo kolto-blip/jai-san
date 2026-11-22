@@ -159,8 +159,9 @@ $('#list').addEventListener('click', (e) => {
   const m = state.materials.find((x) => String(x.id) === b.dataset.play);
   if (!m?.youtubeId) return window.open(m?.url, '_blank', 'noopener');
   $('#video-title').textContent = m.title;
-  $('#video-box').innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(m.youtubeId)}?autoplay=1&rel=0"
-    title="${esc(m.title)}" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
+  $('#video-yt').href = m.url;
+  $('#video-box').innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(m.youtubeId)}?autoplay=1&rel=0&playsinline=1&origin=${encodeURIComponent(location.origin)}"
+    title="${esc(m.title)}" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
   dlg.showModal();
 });
 const closeVideo = () => {
