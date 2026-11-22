@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="kk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#2b1a63">
+  <meta name="robots" content="noindex">
+  <title>Мұғалім беті — Математика</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/admin.css">
+</head>
+<body>
+  <div class="wrap">
+    <!-- Закрыто -->
+    <section id="closed" class="join" hidden>
+      <div class="card msg-card">
+        <div class="big-emoji">🔒</div>
+        <h2>Мұғалім беті жабық</h2>
+        <p>Сайт интернетте жұмыс істеп тұр, бірақ <b>ADMIN_PIN</b> айнымалысы орнатылмаған. Render баптауларында ADMIN_PIN қосыңыз.</p>
+        <a class="btn btn-blue" href="/">Оқушы беті</a>
+      </div>
+    </section>
+
+    <!-- Вход по PIN -->
+    <section id="login" class="join" hidden>
+      <div class="logo" aria-hidden="true"><span>+</span><span>−</span><span>×</span><span>÷</span></div>
+      <h1>Мұғалім беті</h1>
+      <p class="sub">Кіру үшін PIN-кодты енгізіңіз</p>
+      <form id="login-form" class="card">
+        <label for="pin">PIN</label>
+        <input id="pin" class="code-input" type="password" inputmode="numeric" autocomplete="current-password" maxlength="32">
+        <div id="login-error" class="form-error" role="alert"></div>
+        <button class="btn btn-purple btn-block" type="submit">Кіру</button>
+      </form>
+    </section>
+
+    <!-- Панель -->
+    <section id="panel" hidden>
+      <header class="admin-top">
+        <h1>Мұғалім беті</h1>
+        <div class="usage" title="Файлдар қоймасы">
+          <div class="usage-text"><b id="usage-used">0</b> МБ / <span id="usage-limit">1024</span> МБ</div>
+          <div class="usage-bar"><div id="usage-fill"></div></div>
+          <div class="usage-sub" id="usage-sub"></div>
+        </div>
+        <div class="top-btns">
+          <a class="btn btn-ghost btn-sm" href="/" target="_blank">Оқушы беті ↗</a>
+          <button class="btn btn-ghost btn-sm" id="logout" type="button">Шығу</button>
+        </div>
+      </header>
+
+      <nav class="tabs" role="tablist">
+        <button class="tab" role="tab" data-tab="materials" aria-selected="true">📚 Материалдар</button>
+        <button class="tab" role="tab" data-tab="classes" aria-selected="false">👥 Сыныптар</button>
+      </nav>
+
+      <!-- Материалы -->
+      <div id="tab-materials">
+        <form id="mat-form" class="card form" autocomplete="off">
+          <div class="form-head">
+            <h2 id="mat-form-title">Жаңа материал</h2>
+            <button type="button" class="btn btn-light btn-sm" id="mat-cancel" hidden>Болдырмау</button>
+          </div>
+
+          <div class="seg" role="radiogroup" aria-label="Түрі" id="mat-type">
+            <button type="button" data-type="file" aria-checked="true" role="radio" class="seg-doc">📄 Файл</button>
+            <button type="button" data-type="video" aria-checked="false" role="radio" class="seg-video">▶ YouTube</button>
+            <button type="button" data-type="slides" aria-checked="false" role="radio" class="seg-pres">📊 Google Slides</button>
+            <button type="button" data-type="link" aria-checked="false" role="radio" class="seg-link">🔗 Сілтеме / тест</button>
+          </div>
+
+          <div id="f-file">
+            <label class="drop" id="drop">
+              <input type="file" id="file" accept=".pdf,.doc,.docx,.odt,.rtf,.ppt,.pptx,.ppsx,.odp">
+              <span class="drop-icon">⬆</span>
+              <span class="drop-text" id="drop-text">Файлды осында сүйреңіз немесе <u>таңдаңыз</u></span>
+              <span class="hint">PDF, Word, PowerPoint · ең көбі 20 МБ</span>
+            </label>
+          </div>
+          <div id="f-url" hidden>
+            <label for="url">Сілтеме</label>
+            <input id="url" type="url" inputmode="url" placeholder="https://">
+          </div>
+
+          <div class="cols">
+            <div>
+              <label for="title">Атауы</label>
+              <input id="title" maxlength="200" required placeholder="Мысалы: Дәреже қасиеттері — конспект">
+            </div>
+            <div>
+              <label for="topic">Тақырып</label>
+              <input id="topic" maxlength="80" list="topics" placeholder="Мысалы: Дәреже">
+              <datalist id="topics"></datalist>
+            </div>
+            <div>
+              <label for="date">Күні</label>
+              <input id="date" type="date">
+            </div>
+          </div>
+
+          <fieldset class="classes-pick">
+            <legend>Кімге арналған</legend>
+            <label class="pick pick-all"><input type="checkbox" id="all-classes"><span>Барлық сыныптар</span></label>
+            <div id="class-picks"></div>
+          </fieldset>
+
+          <div class="progress" id="progress" hidden><div id="progress-fill"></div></div>
+          <div class="form-error" id="mat-error" role="alert"></div>
+          <button class="btn btn-green" type="submit" id="mat-submit">💾 Сақтау</button>
+        </form>
+
+        <div class="list-tools">
+          <input id="mat-search" class="search" type="search" placeholder="Материалды іздеу">
+          <select id="mat-class-filter" aria-label="Сынып бойынша"><option value="">Барлық сыныптар</option></select>
+        </div>
+        <div id="mat-list" class="admin-list"></div>
+      </div>
+
+      <!-- Классы -->
+      <div id="tab-classes" hidden>
+        <form id="class-form" class="card form inline-form" autocomplete="off">
+          <div>
+            <label for="class-name">Сынып</label>
+            <input id="class-name" maxlength="30" placeholder="7Ә" required>
+          </div>
+          <div>
+            <label for="class-code">Код (міндетті емес)</label>
+            <input id="class-code" maxlength="6" placeholder="Автоматты" class="upper">
+          </div>
+          <button class="btn btn-green" type="submit">➕ Қосу</button>
+          <div class="form-error" id="class-error" role="alert"></div>
+        </form>
+        <div id="class-list" class="class-grid"></div>
+      </div>
+    </section>
+
+    <div id="loading" class="empty"><div class="big-emoji">⏳</div>Жүктелуде…</div>
+  </div>
+
+  <dialog id="code-dlg">
+    <form class="modal confirm" method="dialog" id="code-dlg-form">
+      <h2>Жаңа код</h2>
+      <p class="hint" id="code-dlg-text"></p>
+      <input id="code-dlg-input" class="code-input" maxlength="6" placeholder="KUN47">
+      <div class="form-error" id="code-dlg-error"></div>
+      <div class="row">
+        <button class="btn btn-light" value="cancel" type="button" id="code-dlg-cancel">Болдырмау</button>
+        <button class="btn btn-purple" value="ok" type="submit">Сақтау</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/common.js"></script>
+  <script src="/admin.js"></script>
+</body>
+</html>

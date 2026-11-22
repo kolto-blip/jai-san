@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="kk">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2b1a63">
+  <title>Математика — сабақ материалдары</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="wrap">
+    <!-- Вход по коду класса -->
+    <section id="join" class="join" hidden>
+      <div class="logo" aria-hidden="true"><span>+</span><span>−</span><span>×</span><span>÷</span></div>
+      <h1>Математика</h1>
+      <p class="sub">Сабақ материалдары: конспект, тапсырма, видео</p>
+      <form id="join-form" class="card" autocomplete="off">
+        <label for="code">Сынып кодын енгізіңіз</label>
+        <input id="code" class="code-input" maxlength="8" inputmode="text" autocapitalize="characters"
+               spellcheck="false" placeholder="KUN47" aria-describedby="join-error">
+        <div id="join-error" class="form-error" role="alert"></div>
+        <button class="btn btn-green btn-block" type="submit">Кіру</button>
+        <p class="hint">Кодты мұғаліміңізден сұраңыз. Бір рет енгізсеңіз жеткілікті — телефон оны есте сақтайды.</p>
+      </form>
+    </section>
+
+    <!-- Материалы класса -->
+    <section id="main" hidden>
+      <header class="top">
+        <div class="cls-badge" id="cls-name">7А</div>
+        <div class="grow">
+          <h1>сыныбының материалдары</h1>
+          <div class="muted" id="cls-count"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="leave" type="button">Сыныпты ауыстыру</button>
+      </header>
+
+      <div class="filters" role="group" aria-label="Материал түрі">
+        <button class="chip" data-kind="all" aria-pressed="true">Барлығы</button>
+        <button class="chip" data-kind="doc" aria-pressed="false"><span class="dot"></span>PDF·Word</button>
+        <button class="chip" data-kind="pres" aria-pressed="false"><span class="dot"></span>Презентация</button>
+        <button class="chip" data-kind="video" aria-pressed="false"><span class="dot"></span>Видео</button>
+        <button class="chip" data-kind="link" aria-pressed="false"><span class="dot"></span>Сілтеме</button>
+      </div>
+      <input id="search" class="search" type="search" placeholder="Атауы бойынша іздеу" aria-label="Іздеу">
+
+      <div id="list"></div>
+    </section>
+
+    <div id="loading" class="empty"><div class="big-emoji">⏳</div>Жүктелуде…</div>
+  </div>
+
+  <dialog id="video-dlg">
+    <div class="modal">
+      <div class="modal-head">
+        <h2 id="video-title"></h2>
+        <button class="btn btn-coral btn-sm" id="video-close" type="button">Жабу ✕</button>
+      </div>
+      <div class="video-box" id="video-box"></div>
+    </div>
+  </dialog>
+
+  <script src="/common.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

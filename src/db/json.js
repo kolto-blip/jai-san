@@ -1,0 +1,112 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+
+// Хранилище без интернета: один JSON-файл в папке data/.
+export async function createJsonRepo(dataDir) {
+  await fs.mkdir(dataDir, { recursive: true });
+  const file = path.join(dataDir, 'db.json');
+  let state = { seq: { classes: 0, materials: 0 }, classes: [], materials: [], settings: {} };
+  try {
+    state = { ...state, ...JSON.parse(await fs.readFile(file, 'utf8')) };
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+
+  let writing = Promise.resolve();
+  const save = () => {
+    const snapshot = JSON.stringify(state, null, 1);
+    writing = writing.then(async () => {
+      const tmp = file + '.tmp';
+      await fs.writeFile(tmp, snapshot);
+      await fs.rename(tmp, file);
+    });
+    return writing;
+  };
+  const clone = (x) => (x ? structuredClone(x) : null);
+  const byDate = (a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.id - a.id);
+
+  return {
+    kind: 'json',
+
+    async getSetting(key) {
+      return state.settings[key] ?? null;
+    },
+    async setSetting(key, value) {
+      state.settings[key] = value;
+      await save();
+    },
+
+    async listClasses() {
+      return clone([...state.classes].sort((a, b) => a.name.localeCompare(b.name, 'kk') || a.id - b.id));
+    },
+    async getClass(id) {
+      return clone(state.classes.find((c) => c.id === id));
+    },
+    async getClassByCode(code) {
+      return clone(state.classes.find((c) => c.code === code));
+    },
+    async createClass({ name, code }) {
+      if (state.classes.some((c) => c.code === code)) throw Object.assign(new Error('dup'), { code: '23505' });
+      const c = { id: ++state.seq.classes, name, code, createdAt: new Date().toISOString() };
+      state.classes.push(c);
+      await save();
+      return clone(c);
+    },
+    async updateClass(id, { name, code }) {
+      const c = state.classes.find((x) => x.id === id);
+      if (!c) return null;
+      if (code && state.classes.some((x) => x.code === code && x.id !== id)) {
+        throw Object.assign(new Error('dup'), { code: '23505' });
+      }
+      if (name) c.name = name;
+      if (code) c.code = code;
+      await save();
+      return clone(c);
+    },
+    async deleteClass(id) {
+      state.classes = state.classes.filter((c) => c.id !== id);
+      for (const m of state.materials) m.classIds = m.classIds.filter((x) => x !== id);
+      await save();
+    },
+
+    async listMaterials() {
+      return clone([...state.materials].sort(byDate));
+    },
+    async listMaterialsForClass(classId) {
+      return clone(state.materials.filter((m) => m.allClasses || m.classIds.includes(classId)).sort(byDate));
+    },
+    async getMaterial(id) {
+      return clone(state.materials.find((m) => m.id === id));
+    },
+    async createMaterial(m) {
+      const rec = {
+        id: ++state.seq.materials,
+        title: m.title, topic: m.topic || '', kind: m.kind, url: m.url ?? null,
+        fileName: m.fileName ?? null, fileMime: m.fileMime ?? null, fileSize: m.fileSize || 0,
+        storage: m.storage ?? null, storageKey: m.storageKey ?? null,
+        allClasses: Boolean(m.allClasses), classIds: m.classIds || [],
+        date: m.date, createdAt: new Date().toISOString(),
+      };
+      state.materials.push(rec);
+      await save();
+      return clone(rec);
+    },
+    async updateMaterial(id, patch) {
+      const m = state.materials.find((x) => x.id === id);
+      if (!m) return null;
+      for (const [k, v] of Object.entries(patch)) if (v !== undefined && k !== 'id') m[k] = v;
+      await save();
+      return clone(m);
+    },
+    async deleteMaterial(id) {
+      state.materials = state.materials.filter((m) => m.id !== id);
+      await save();
+    },
+    async usageBytes() {
+      return state.materials.reduce((s, m) => s + (m.storage ? m.fileSize : 0), 0);
+    },
+    async close() {
+      await writing;
+    },
+  };
+}
