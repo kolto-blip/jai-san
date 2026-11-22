@@ -354,6 +354,84 @@ function suite(label, makeEnv) {
       assert.equal((await plain.req('/api/materials')).status, 200);
     });
 
+    test('фото домашней работы: отправка, доступ, проверка учителем', async () => {
+      const a = admin();
+      await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      const ov = await (await a.req('/api/admin/overview')).json();
+      const c7 = ov.classes.find((c) => c.name === '7Ә');
+      const hwMat = await (await a.req('/api/admin/materials', {
+        method: 'POST',
+        json: { title: 'Үй жұмысы №5', topic: 'Теңдеулер', type: 'link', url: 'https://example.com/', classIds: [c7.id], hw: { open: true, due: '2000-01-01' } },
+      })).json();
+      assert.deepEqual(hwMat.hw, { open: true, due: '2000-01-01' });
+
+      const jpg1 = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('фото-1')]);
+      const jpg2 = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe1]), Buffer.from('фото-2 ұзынырақ')]);
+      const send = (cl, parts, meta = { name: 'Әлия Серікқызы', comment: '№4 шықпады' }) => cl.req(`/api/hw/${hwMat.id}`, {
+        method: 'POST', body: Buffer.concat(parts),
+        headers: { 'x-parts': parts.map((p) => p.length).join(','), 'x-meta': encodeURIComponent(JSON.stringify(meta)) },
+      });
+
+      const s = client(srv.base);
+      await s.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
+      const ok = await send(s, [jpg1, jpg2]);
+      assert.equal(ok.status, 200, await ok.clone().text());
+      const okj = await ok.json();
+      assert.equal(okj.photos, 2);
+      assert.equal(okj.late, true, 'после срока — «кешігіп»');
+
+      // не картинка, лишние фото, размер не сходится
+      assert.equal((await send(s, [Buffer.from('<html>это не фото</html>')])).status, 400);
+      assert.equal((await send(s, Array(7).fill(jpg1))).status, 400);
+      const bad = await s.req(`/api/hw/${hwMat.id}`, { method: 'POST', body: jpg1, headers: { 'x-parts': '999', 'x-meta': '%7B%22name%22%3A%22%D0%90%D0%B9%22%7D' } });
+      assert.equal(bad.status, 400);
+      // другой класс сдать не может
+      const s8 = client(srv.base);
+      await s8.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      assert.equal((await send(s8, [jpg1])).status, 404);
+
+      // учитель видит работу и фото; ученики чужие фото не открывают
+      let subs = await (await a.req(`/api/admin/materials/${hwMat.id}/submissions`)).json();
+      assert.equal(subs.submissions.length, 1);
+      const sub = subs.submissions[0];
+      assert.equal(sub.comment, '№4 шықпады');
+      assert.equal(sub.files.length, 2);
+      const photo = await a.req(sub.files[1].url);
+      assert.equal(photo.status, 200);
+      assert.equal(photo.headers.get('content-type'), 'image/jpeg');
+      assert.deepEqual(Buffer.from(await photo.arrayBuffer()), jpg2);
+      assert.equal((await s.req(sub.files[0].url)).status, 403, 'без личного входа фото видит только учитель');
+      assert.equal((await fetch(srv.base + sub.files[0].url)).status, 403);
+      const usage = (await (await a.req('/api/admin/overview')).json()).usage;
+      assert.equal(usage.photoBytes, jpg1.length + jpg2.length);
+
+      // ученик по списку: видит свою работу, оценку и свои фото
+      await a.req(`/api/admin/classes/${c7.id}/students`, { method: 'POST', json: { names: 'Данияр Қ.\nМадина Е.' } });
+      const roster = (await (await s.req('/api/roster')).json()).students;
+      const dan = roster.find((x) => x.name === 'Данияр Қ.');
+      const mad = roster.find((x) => x.name === 'Мадина Е.');
+      await s.req('/api/student/login', { method: 'POST', json: { id: dan.id, pin: '1357' } });
+      assert.equal((await send(s, [jpg1], { name: 'кез келген', comment: '' })).status, 200);
+      subs = await (await a.req(`/api/admin/materials/${hwMat.id}/submissions`)).json();
+      const dsub = subs.submissions.find((x) => x.studentId === dan.id);
+      assert.equal(dsub.name, 'Данияр Қ.');
+      assert.deepEqual(subs.missing.map((x) => x.name), ['Мадина Е.']);
+      assert.equal((await a.req(`/api/admin/submissions/${dsub.id}`, { method: 'PUT', json: { status: 'checked', grade: '5', feedback: 'Жарайсың!' } })).status, 200);
+      const mine = (await (await s.req('/api/materials')).json()).materials.find((m) => m.id === hwMat.id);
+      assert.deepEqual(mine.hw.sent.checked, { grade: '5', feedback: 'Жарайсың!' });
+      assert.equal((await s.req(mine.hw.sent.files[0])).status, 200, 'свои фото ученик видит');
+      const m2 = client(srv.base);
+      await m2.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
+      await m2.req('/api/student/login', { method: 'POST', json: { id: mad.id, pin: '2468' } });
+      assert.equal((await m2.req(mine.hw.sent.files[0])).status, 403, 'одноклассник чужие фото не видит');
+
+      // удаление материала удаляет и фото
+      for (const x of await (await a.req(`/api/admin/classes/${c7.id}/students`)).json()) await a.req(`/api/admin/students/${x.id}`, { method: 'DELETE' });
+      assert.equal((await a.req(`/api/admin/materials/${hwMat.id}`, { method: 'DELETE' })).status, 200);
+      assert.equal((await a.req(sub.files[0].url)).status, 404);
+      assert.equal((await (await a.req('/api/admin/overview')).json()).usage.photoBytes, 0);
+    });
+
     test('подбор кода класса блокируется по IP', async () => {
       const s = client(srv.base);
       let last;
@@ -382,7 +460,7 @@ if (process.env.TEST_DATABASE_URL) {
     const c = new pg.Client(process.env.TEST_DATABASE_URL);
     await c.connect();
     try {
-      await c.query('DROP TABLE IF EXISTS results, students, classes, materials, files, settings CASCADE');
+      await c.query('DROP TABLE IF EXISTS submission_files, submissions, results, students, classes, materials, files, settings CASCADE');
     } finally {
       await c.end();
     }

@@ -55,7 +55,7 @@ function renderUsage() {
   fill.style.width = pct + '%';
   fill.className = pct > 95 ? 'full' : pct > 80 ? 'warn' : '';
   const names = { db: 'Neon Postgres', local: 'жергілікті папка data/', b2: 'Backblaze B2' };
-  $('#usage-sub').textContent = `Қойма: ${names[u.storage] || u.storage} · бір файл ≤ ${u.maxFileMb} МБ`;
+  $('#usage-sub').textContent = `Қойма: ${names[u.storage] || u.storage} · оқушы фотолары: ${(u.photoBytes / 1048576).toFixed(1).replace('.', ',')} МБ`;
 }
 
 // ---------- Вкладки ----------
@@ -259,6 +259,8 @@ function resetForm() {
   syncAllClasses();
   $('#quiz-key').open = false;
   $('#quiz-key').classList.remove('has-key');
+  $('#hw-key').open = false;
+  $('#hw-key').classList.remove('has-key');
 }
 $('#mat-cancel').addEventListener('click', resetForm);
 
@@ -277,6 +279,13 @@ function editMaterial(m) {
   $('#topic').value = m.topic;
   $('#date').value = m.date;
   $('#all-classes').checked = m.allClasses;
+  if (m.hw) {
+    $('#hw-on').checked = true;
+    $('#hw-open').checked = m.hw.open;
+    $('#hw-due').value = m.hw.due || '';
+    $('#hw-key').open = true;
+    $('#hw-key').classList.add('has-key');
+  }
   if (m.quizKey) {
     $('#quiz-answers').value = m.quizKey.answers.join('\n');
     $('#quiz-open').checked = m.quizKey.open;
@@ -299,6 +308,7 @@ function formMeta() {
     allClasses: $('#all-classes').checked,
     classIds: [...document.querySelectorAll('#class-picks input:checked')].map((i) => Number(i.value)),
     quiz: quizMeta(),
+    hw: $('#hw-on').checked ? { open: $('#hw-open').checked, due: $('#hw-due').value || null } : null,
   };
 }
 
@@ -394,9 +404,10 @@ function renderMaterials() {
         <div><h3>${esc(m.title)}${m.isNew ? '<span class="badge-new">Жаңа</span>' : ''}</h3>
           <div class="meta"><span class="kind-name">${k.name}</span><span>${esc(m.topic)}</span><span>${fmtDate(m.date)}</span>
           ${m.file ? `<span>${esc(m.file.name)} · ${fmtSize(m.file.size)}</span>` : ''}</div>
-          <div class="meta">${tags}${m.quizKey ? ` <span class="tag tag-quiz">✏️ ${m.quizKey.answers.length} есеп${m.quizKey.open ? '' : ' · жабық'}</span>` : ''}</div></div>
+          <div class="meta">${tags}${m.hw ? ` <span class="tag tag-hw">📷 фото${m.hw.due ? ' · ' + fmtDate(m.hw.due) + ' дейін' : ''}${m.hw.open ? '' : ' · жабық'}</span>` : ''}${m.quizKey ? ` <span class="tag tag-quiz">✏️ ${m.quizKey.answers.length} есеп${m.quizKey.open ? '' : ' · жабық'}</span>` : ''}</div></div>
         <div class="btns">
           <a class="btn btn-light btn-sm" href="${esc(open)}" target="_blank" rel="noopener">Ашу</a>
+          ${m.hw ? `<button class="btn btn-blue btn-sm" data-act="subs">📷 Жұмыстар (${m.submissions.total}${m.submissions.unchecked ? ` · ${m.submissions.unchecked} жаңа` : ''})</button>` : ''}
           ${m.quizKey ? `<button class="btn btn-green btn-sm" data-act="results">📊 Нәтижелер (${m.results})</button>` : ''}
           <button class="btn btn-blue btn-sm" data-act="edit">✏️ Өзгерту</button>
           <button class="btn btn-coral btn-sm" data-act="del">🗑 Жою</button>
@@ -413,6 +424,7 @@ $('#mat-list').addEventListener('click', async (e) => {
   const m = S.materials.find((x) => x.id === Number(b.closest('[data-id]').dataset.id));
   if (b.dataset.act === 'edit') return editMaterial(m);
   if (b.dataset.act === 'results') return openResults(m);
+  if (b.dataset.act === 'subs') return openSubs(m);
   if (!(await confirmBox(`«${m.title}» материалы жойылады. Оны қайтару мүмкін емес.`))) return;
   try {
     await api(`/api/admin/materials/${m.id}`, { method: 'DELETE' });
@@ -573,6 +585,141 @@ $('#stu-list').addEventListener('click', async (e) => {
   } catch (err) {
     toast(err.message, true);
   }
+});
+
+// ---------- Жұмыстар (фото) ----------
+const subDlg = $('#sub-dlg');
+const SB = { mat: null, data: null, photos: [], i: 0, rot: 0 };
+
+async function openSubs(m) {
+  SB.mat = m;
+  $('#sub-title').textContent = `📷 ${m.title}`;
+  try {
+    SB.data = await api(`/api/admin/materials/${m.id}/submissions`);
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const all = [...SB.data.submissions, ...SB.data.missing];
+  const ids = [...new Set(all.map((x) => x.classId))];
+  const cur = $('#sub-class').value;
+  $('#sub-class').innerHTML = '<option value="">Барлық сыныптар</option>' +
+    ids.map((id) => `<option value="${id}">${esc(all.find((x) => x.classId === id).className)}</option>`).join('');
+  $('#sub-class').value = ids.includes(Number(cur)) ? cur : '';
+  renderSubs();
+  if (!subDlg.open) subDlg.showModal();
+}
+
+function renderSubs() {
+  const cf = Number($('#sub-class').value) || 0;
+  const onlyNew = $('#sub-new').checked;
+  const subs = SB.data.submissions
+    .filter((x) => (!cf || x.classId === cf) && (!onlyNew || x.status !== 'checked'))
+    .sort((a, b) => a.className.localeCompare(b.className, 'kk') || a.name.localeCompare(b.name, 'kk') || a.id - b.id);
+  const missing = SB.data.missing.filter((x) => !cf || x.classId === cf);
+  const unchecked = SB.data.submissions.filter((x) => (!cf || x.classId === cf) && x.status !== 'checked').length;
+  $('#sub-summary').innerHTML = `<span class="tag">Жіберді: ${new Set(SB.data.submissions.filter((x) => !cf || x.classId === cf).map((x) => x.studentId || x.name)).size}</span>
+    ${unchecked ? `<span class="tag tag-hw">Тексерілмеген: ${unchecked}</span>` : '<span class="tag tag-quiz">Бәрі тексерілді</span>'}
+    ${missing.length ? `<span class="tag tag-none">Жібермегендер: ${missing.length}</span>` : ''}
+    ${SB.data.material.due ? `<span class="tag">Мерзімі: ${fmtDate(SB.data.material.due)}</span>` : ''}`;
+  SB.photos = [];
+  const fmtT = (t) => new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  $('#sub-list').innerHTML = (subs.map((x) => {
+    const ph = x.files.map((f) => {
+      SB.photos.push({ url: f.url, cap: `${x.name} · ${x.className}` });
+      return `<button type="button" data-ph="${SB.photos.length - 1}"><img src="${f.url}" alt="" loading="lazy"></button>`;
+    }).join('');
+    return `<div class="sub ${x.status === 'checked' ? 'checked' : ''}" data-sub="${x.id}">
+      <div class="sub-head"><b>${esc(x.name)}</b><span class="tag">${esc(x.className)}</span><span class="hint">${fmtT(x.createdAt)}</span>
+        ${x.late ? '<span class="tag tag-none">кешігіп</span>' : ''}${x.status === 'checked' ? '<span class="tag tag-quiz">✅ тексерілді</span>' : ''}</div>
+      ${x.comment ? `<div class="sub-comment">«${esc(x.comment)}»</div>` : ''}
+      <div class="sub-photos">${ph}</div>
+      <div class="sub-check">
+        <input data-f="grade" maxlength="20" placeholder="Баға" value="${esc(x.grade)}" aria-label="Баға">
+        <input data-f="feedback" maxlength="300" placeholder="Оқушыға пікір (міндетті емес)" value="${esc(x.feedback)}" aria-label="Пікір">
+        <button class="btn btn-green btn-sm" data-sb="check">✅ Тексерілді</button>
+        <button class="btn btn-coral btn-sm" data-sb="del" aria-label="Жою">🗑</button>
+      </div></div>`;
+  }).join('') || '<div class="empty res-empty"><div class="big-emoji">📭</div>Әзірге жұмыс жоқ</div>') +
+    (missing.length ? `<div class="sub sub-missing"><b>Жібермегендер:</b> ${missing.map((x) => esc(x.name) + (cf ? '' : ` (${esc(x.className)})`)).join(', ')}</div>` : '');
+}
+
+$('#sub-class').addEventListener('change', renderSubs);
+$('#sub-new').addEventListener('change', renderSubs);
+$('#sub-close').addEventListener('click', () => subDlg.close());
+subDlg.addEventListener('close', () => refresh().catch(() => {}));
+
+$('#sub-list').addEventListener('click', async (e) => {
+  const ph = e.target.closest('[data-ph]');
+  if (ph) return openLightbox(Number(ph.dataset.ph));
+  const b = e.target.closest('[data-sb]');
+  if (!b) return;
+  const card = b.closest('[data-sub]');
+  const id = card.dataset.sub;
+  try {
+    if (b.dataset.sb === 'check') {
+      await api(`/api/admin/submissions/${id}`, {
+        method: 'PUT',
+        body: { status: 'checked', grade: card.querySelector('[data-f=grade]').value, feedback: card.querySelector('[data-f=feedback]').value },
+      });
+      toast('Сақталды — оқушы бағасын көреді');
+    } else {
+      if (!(await confirmBox('Бұл жұмыс пен оның фотолары жойылады.'))) return;
+      await api(`/api/admin/submissions/${id}`, { method: 'DELETE' });
+    }
+    await openSubs(SB.mat);
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+// Enter в поле оценки — то же, что «Тексерілді»
+$('#sub-list').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.matches('.sub-check input')) {
+    e.preventDefault();
+    e.target.closest('[data-sub]').querySelector('[data-sb=check]').click();
+  }
+});
+
+$('#sub-clear').addEventListener('click', async () => {
+  if (!(await confirmBox(`«${SB.mat.title}» бойынша барлық жұмыстар мен фотолар жойылады. Бағалар да өшеді.`))) return;
+  try {
+    const r = await api(`/api/admin/materials/${SB.mat.id}/submissions`, { method: 'DELETE' });
+    toast(`Босатылды: ${(r.freedBytes / 1048576).toFixed(1).replace('.', ',')} МБ`);
+    await openSubs(SB.mat);
+  } catch (err) {
+    toast(err.message, true);
+  }
+});
+
+// Просмотр фото: стрелки, поворот
+const lb = $('#lb-dlg');
+function showPhoto() {
+  const p = SB.photos[SB.i];
+  $('#lb-img').src = p.url;
+  $('#lb-img').style.transform = `rotate(${SB.rot}deg)`;
+  $('#lb-cap').textContent = `${p.cap} · ${SB.i + 1}/${SB.photos.length}`;
+  $('#lb-open').href = p.url;
+}
+function openLightbox(i) {
+  SB.i = i;
+  SB.rot = 0;
+  showPhoto();
+  lb.showModal();
+}
+const step = (d) => {
+  SB.i = (SB.i + d + SB.photos.length) % SB.photos.length;
+  SB.rot = 0;
+  showPhoto();
+};
+$('#lb-prev').addEventListener('click', () => step(-1));
+$('#lb-next').addEventListener('click', () => step(1));
+$('#lb-close').addEventListener('click', () => lb.close());
+$('#lb-rot').addEventListener('click', () => {
+  SB.rot = (SB.rot + 90) % 360;
+  showPhoto();
+});
+lb.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft') step(-1);
+  if (e.key === 'ArrowRight') step(1);
 });
 
 resetForm();

@@ -105,6 +105,21 @@
             <div id="class-picks"></div>
           </fieldset>
 
+          <details class="quiz-key" id="hw-key">
+            <summary>📷 Үй жұмысының фотосын қабылдау <span class="hint">(міндетті емес)</span></summary>
+            <div class="quiz-key-body">
+              <div class="quiz-opts">
+                <label class="pick"><input type="checkbox" id="hw-on"><span>Оқушылар фото жібере алады</span></label>
+                <label class="pick"><input type="checkbox" id="hw-open" checked><span>Қабылдау ашық</span></label>
+              </div>
+              <div>
+                <label for="hw-due">Тапсыру мерзімі (міндетті емес)</label>
+                <input id="hw-due" type="date">
+                <p class="hint">Мерзімнен кейін де қабылданады, бірақ «кешігіп» деп белгіленеді.</p>
+              </div>
+            </div>
+          </details>
+
           <details class="quiz-key" id="quiz-key">
             <summary>✏️ Жауап кілті — оқушылар жауап береді, сайт өзі тексереді <span class="hint">(міндетті емес)</span></summary>
             <div class="quiz-key-body">
@@ -185,6 +200,36 @@
         <p class="hint">Тек атын немесе «Әлия С.» деп қысқа жазуға болады — тізімді бүкіл сынып көреді.</p>
         <button class="btn btn-green" type="button" id="stu-save">Қосу</button>
       </details>
+    </div>
+  </dialog>
+
+  <dialog id="sub-dlg">
+    <div class="modal res">
+      <div class="modal-head">
+        <h2 id="sub-title">Жұмыстар</h2>
+        <button class="btn btn-coral btn-sm" id="sub-close" type="button">Жабу ✕</button>
+      </div>
+      <div class="res-tools">
+        <select id="sub-class" aria-label="Сынып"></select>
+        <label class="pick"><input type="checkbox" id="sub-new"><span>Тек тексерілмегендер</span></label>
+        <button class="btn btn-light btn-sm" id="sub-clear" type="button">🗑 Барлық фотоны жою</button>
+      </div>
+      <div class="res-summary" id="sub-summary"></div>
+      <div class="sub-list" id="sub-list"></div>
+    </div>
+  </dialog>
+
+  <dialog id="lb-dlg" class="lb">
+    <div class="lb-top">
+      <span id="lb-cap"></span>
+      <button class="btn btn-light btn-sm" id="lb-rot" type="button">↻ Бұру</button>
+      <a class="btn btn-light btn-sm" id="lb-open" target="_blank" href="#">↗</a>
+      <button class="btn btn-coral btn-sm" id="lb-close" type="button">✕</button>
+    </div>
+    <div class="lb-stage">
+      <button class="lb-nav" id="lb-prev" type="button" aria-label="Алдыңғы">‹</button>
+      <img id="lb-img" alt="">
+      <button class="lb-nav" id="lb-next" type="button" aria-label="Келесі">›</button>
     </div>
   </dialog>
 

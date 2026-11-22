@@ -28,7 +28,7 @@ const STATIC_TYPES = {
 
 const PAGE_CSP = [
   "default-src 'self'",
-  "img-src 'self' data: https://i.ytimg.com",
+  "img-src 'self' data: blob: https://i.ytimg.com",
   "frame-src https://www.youtube-nocookie.com",
   "style-src 'self'",
   "font-src 'self'",
@@ -125,6 +125,7 @@ export async function createApp() {
       out.url = m.url;
       out.action = 'link';
     }
+    if (m.hw) out.hw = { open: m.hw.open, due: m.hw.due || null };
     if (m.quiz?.answers?.length) {
       // сами ответы ученикам не отдаём
       out.quiz = { count: m.quiz.answers.length, open: m.quiz.open, retry: m.quiz.retry };
@@ -132,11 +133,36 @@ export async function createApp() {
     return out;
   }
 
-  function adminMaterial(m, resultCounts = {}) {
+  function adminMaterial(m, resultCounts = {}, subCounts = {}) {
     return {
       ...publicMaterial(m), allClasses: m.allClasses, classIds: m.classIds, storage: m.storage,
       quizKey: m.quiz || null, results: resultCounts[m.id] || 0,
+      submissions: subCounts[m.id] || { total: 0, unchecked: 0 },
     };
+  }
+
+  function parseHw(h) {
+    if (!h) return null;
+    const due = h.due ? String(h.due) : null;
+    if (due && !validDate(due)) throw new HttpError(400, 'Мерзімі қате');
+    return { open: h.open !== false, due };
+  }
+
+  // сдано после конца дня срока (по времени школы)
+  function isLate(createdAt, due) {
+    if (!due) return false;
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: config.timeZone }).format(new Date(createdAt));
+    return day > due;
+  }
+
+  async function removeStored(files) {
+    for (const f of files) {
+      try {
+        await storages.get(f.storage).del(f.storageKey);
+      } catch (e) {
+        console.error('Фото жою қатесі:', e.message);
+      }
+    }
   }
 
   function parseQuiz(q) {
@@ -164,6 +190,7 @@ export async function createApp() {
 
     const fields = { title, topic, date, allClasses, classIds };
     if (input.quiz !== undefined) fields.quiz = parseQuiz(input.quiz);
+    if (input.hw !== undefined) fields.hw = parseHw(input.hw);
     if (!isFile) {
       const type = input.type || (existing && (existing.kind === 'pres' ? 'slides' : existing.kind));
       const url = safeHttpUrl(input.url ?? existing?.url);
@@ -260,6 +287,22 @@ export async function createApp() {
           const g = grade(r.answers, byId[m.id].quiz.answers);
           m.quiz.done = { score: g.score, total: g.total };
         }
+      }
+    }
+    if (a.student) {
+      const subs = {};
+      for (const x of await repo.listSubmissionsForStudent(a.student.id)) (subs[x.materialId] ||= []).push(x);
+      for (const m of list) {
+        const mine = subs[m.id];
+        if (!m.hw || !mine) continue;
+        const last = mine[mine.length - 1];
+        const checked = [...mine].reverse().find((x) => x.status === 'checked');
+        m.hw.sent = {
+          at: last.createdAt, photos: last.files.length, count: mine.length,
+          files: last.files.map((f) => `/hw/photo/${f.id}`),
+          checked: checked ? { grade: checked.grade, feedback: checked.feedback } : null,
+          late: isLate(last.createdAt, m.hw.due),
+        };
       }
     }
     sendJson(res, 200, {
@@ -370,15 +413,16 @@ export async function createApp() {
 
   route('GET', /^\/api\/admin\/overview$/, async (req, res) => {
     requireAdmin(req);
-    const [classes, materials, used, resultCounts, studentCounts] = await Promise.all([
+    const [classes, materials, used, resultCounts, studentCounts, subCounts, photoBytes] = await Promise.all([
       repo.listClasses(), repo.listMaterials(), repo.usageBytes(), repo.countResults(), repo.countStudents(),
+      repo.countSubmissions(), repo.photoBytes(),
     ]);
     const counts = {};
     for (const m of materials) for (const id of m.classIds) counts[id] = (counts[id] || 0) + 1;
     sendJson(res, 200, {
       classes: classes.map((c) => ({ ...c, materials: counts[c.id] || 0, students: studentCounts[c.id] || { total: 0, registered: 0 } })),
-      materials: materials.map((m) => adminMaterial(m, resultCounts)),
-      usage: { usedBytes: used, limitMb: storages.limitMb, storage: storages.active.name, maxFileMb: config.maxFileBytes / 1048576 },
+      materials: materials.map((m) => adminMaterial(m, resultCounts, subCounts)),
+      usage: { usedBytes: used, photoBytes, limitMb: storages.limitMb, storage: storages.active.name, maxFileMb: config.maxFileBytes / 1048576 },
       baseUrl: baseUrl(req),
     });
   });
@@ -477,10 +521,140 @@ export async function createApp() {
     requireAdmin(req);
     const m = await repo.getMaterial(Number(id));
     if (m) {
+      const photos = await repo.deleteSubmissionsForMaterial(m.id);
       await repo.deleteMaterial(m.id);
       await removeFile(m);
+      await removeStored(photos);
     }
     sendJson(res, 200, { ok: true });
+  });
+
+  // ---------- Фото домашних работ ----------
+  const MAX_PHOTOS = 6;
+  const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
+
+  function imageMime(buf) {
+    if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
+    if (buf.length > 8 && buf.readUInt32BE(0) === 0x89504e47) return 'image/png';
+    if (buf.length > 12 && buf.toString('ascii', 0, 4) === 'RIFF' && buf.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    return null;
+  }
+
+  // Тело запроса — фото подряд, их размеры в заголовке X-Parts («123,456»).
+  route('POST', /^\/api\/hw\/(\d+)$/, async (req, res, [id]) => {
+    const ip = clientIp(req);
+    if (submitLimiter.isBlocked(ip)) return tooMany(res, submitLimiter, ip);
+    const a = await access(req);
+    if (!a.cls) return sendJson(res, 401, { error: 'Сынып кодын енгізіңіз' });
+    if (a.roster && !a.student) {
+      if (a.admin) throw new HttpError(403, 'Мұғалім ретінде қарап отырсыз — жұмыс жіберілмейді');
+      return sendJson(res, 401, { error: 'Атыңызды таңдап, PIN енгізіңіз', needLogin: true });
+    }
+    const m = await repo.getMaterial(Number(id));
+    if (!m || !m.hw || !(m.allClasses || m.classIds.includes(a.cls.id))) throw new HttpError(404, 'Тапсырма табылмады');
+    if (!m.hw.open) throw new HttpError(403, 'Жұмыс қабылдау жабылды');
+    const meta = readMeta(req);
+    const name = a.student ? a.student.name : String(meta.name || '').normalize('NFC').trim().replace(/\s+/g, ' ').slice(0, 60);
+    if (name.length < 2) throw new HttpError(400, 'Аты-жөніңізді жазыңыз');
+    const sizes = String(req.headers['x-parts'] || '').split(',').map(Number);
+    if (!sizes.length || sizes.length > MAX_PHOTOS || sizes.some((n) => !Number.isInteger(n) || n <= 0 || n > MAX_PHOTO_BYTES)) {
+      throw new HttpError(400, `1–${MAX_PHOTOS} фото, әрқайсысы ${MAX_PHOTO_BYTES / 1048576} МБ-тан аспауы керек`);
+    }
+    const total = sizes.reduce((x, y) => x + y, 0);
+    const body = await readBody(req, total);
+    if (body.length !== total) throw new HttpError(400, 'Фото толық жүктелмеді, қайталаңыз');
+    if ((await repo.usageBytes()) + total > storages.limitMb * 1024 * 1024) throw new HttpError(413, 'Қоймада орын жоқ. Мұғалімге айтыңыз.');
+    const parts = [];
+    let off = 0;
+    for (const n of sizes) {
+      const buf = body.subarray(off, off + n);
+      off += n;
+      const mime = imageMime(buf);
+      if (!mime) throw new HttpError(400, 'Тек сурет (JPEG, PNG) жіберуге болады');
+      parts.push({ buf, mime });
+    }
+    submitLimiter.fail(ip);
+    const files = [];
+    try {
+      for (const p of parts) {
+        const key = 'hw-' + crypto.randomBytes(16).toString('hex');
+        await storages.active.put(key, p.buf);
+        files.push({ storage: storages.active.name, storageKey: key, size: p.buf.length, mime: p.mime });
+      }
+    } catch (e) {
+      await removeStored(files);
+      throw e;
+    }
+    const comment = String(meta.comment || '').trim().slice(0, 300);
+    const sub = await repo.createSubmission({ materialId: m.id, classId: a.cls.id, studentId: a.student?.id ?? null, name, comment }, files);
+    sendJson(res, 200, { ok: true, at: sub.createdAt, photos: files.length, late: isLate(sub.createdAt, m.hw.due) });
+  });
+
+  // Фото видит только учитель и сам ученик
+  route('GET', /^\/hw\/photo\/(\d+)$/, async (req, res, [id]) => {
+    const f = await repo.getSubmissionFile(Number(id));
+    let allowed = Boolean(f && auth.isAdmin(req));
+    if (f && !allowed && f.studentId) {
+      const a = await access(req);
+      allowed = a.student?.id === f.studentId;
+    }
+    if (!allowed) {
+      res.writeHead(f ? 403 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+      return res.end(errorPage(f ? 'Бұл фотоны тек мұғалім мен оның иесі көре алады.' : 'Фото табылмады.'));
+    }
+    const buf = await storages.get(f.storage).get(f.storageKey);
+    res.writeHead(200, {
+      'Content-Type': f.mime, 'Content-Length': buf.length, 'Cache-Control': 'private, max-age=86400',
+      'X-Content-Type-Options': 'nosniff', 'Content-Disposition': `inline; filename="photo-${f.id}.jpg"`,
+    });
+    res.end(buf);
+  });
+
+  route('GET', /^\/api\/admin\/materials\/(\d+)\/submissions$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    const m = await repo.getMaterial(Number(id));
+    if (!m) throw new HttpError(404, 'Материал табылмады');
+    const classes = await repo.listClasses();
+    const names = Object.fromEntries(classes.map((c) => [c.id, c.name]));
+    const students = {};
+    for (const c of classes) {
+      if (!m.allClasses && !m.classIds.includes(c.id)) continue;
+      for (const st of await repo.listStudents(c.id)) students[st.id] = st;
+    }
+    const subs = (await repo.listSubmissionsForMaterial(m.id)).map((x) => ({
+      id: x.id, name: students[x.studentId]?.name || x.name, classId: x.classId, className: names[x.classId] || '—',
+      studentId: x.studentId, comment: x.comment, status: x.status, grade: x.grade, feedback: x.feedback,
+      createdAt: x.createdAt, late: isLate(x.createdAt, m.hw?.due),
+      files: x.files.map((f) => ({ id: f.id, size: f.size, url: `/hw/photo/${f.id}` })),
+    }));
+    const done = new Set(subs.map((x) => x.studentId).filter(Boolean));
+    const missing = Object.values(students).filter((st) => !done.has(st.id))
+      .map((st) => ({ name: st.name, classId: st.classId, className: names[st.classId] || '—', registered: st.registered }));
+    sendJson(res, 200, { material: { id: m.id, title: m.title, due: m.hw?.due || null }, submissions: subs, missing });
+  });
+
+  route('PUT', /^\/api\/admin\/submissions\/(\d+)$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    const b = await readJson(req);
+    await repo.updateSubmission(Number(id), {
+      status: b.status === 'checked' ? 'checked' : 'new',
+      grade: String(b.grade || '').trim().slice(0, 20),
+      feedback: String(b.feedback || '').trim().slice(0, 300),
+    });
+    sendJson(res, 200, { ok: true });
+  });
+
+  route('DELETE', /^\/api\/admin\/submissions\/(\d+)$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    await removeStored(await repo.deleteSubmission(Number(id)));
+    sendJson(res, 200, { ok: true });
+  });
+
+  route('DELETE', /^\/api\/admin\/materials\/(\d+)\/submissions$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    const files = await repo.deleteSubmissionsForMaterial(Number(id));
+    await removeStored(files);
+    sendJson(res, 200, { ok: true, freedBytes: files.reduce((x, f) => x + f.size, 0) });
   });
 
   // ---------- Списки учеников (учитель) ----------

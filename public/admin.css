@@ -159,3 +159,31 @@
 .stu-add label { display: block; font-weight: 800; margin-bottom: 6px; font-size: 15px; }
 .stu-add textarea { width: 100%; padding: 10px 14px; border-radius: 14px; border: 2px solid var(--line); background: var(--soft); font-size: 17px; line-height: 1.5; }
 .res-wrap tr.missing td { color: var(--muted); background: #fafafa; }
+
+/* Фото домашних работ */
+#hw-due { max-width: 220px; min-height: var(--tap); padding: 8px 14px; border-radius: 14px; border: 2px solid var(--line); background: var(--soft); font-size: 17px; }
+.tag-hw { background: #eaf5fe; color: var(--blue-d); }
+.sub-list { display: grid; gap: 12px; max-height: 66vh; overflow-y: auto; padding: 2px; }
+.sub { border: 2px solid var(--line); border-radius: 16px; padding: 12px; display: grid; gap: 10px; }
+.sub.checked { border-color: #b8ecd0; background: #f6fdf9; }
+.sub-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.sub-head b { font-size: 17px; }
+.sub-comment { font-style: italic; color: var(--muted); }
+.sub-photos { display: flex; gap: 8px; flex-wrap: wrap; }
+.sub-photos button { width: 92px; height: 120px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; cursor: zoom-in; background: var(--soft); }
+.sub-photos img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sub-check { display: grid; grid-template-columns: 90px 1fr; gap: 8px; }
+@media (min-width: 760px) { .sub-check { grid-template-columns: 90px 1fr auto auto; } }
+.sub-check input { min-height: 44px; padding: 6px 12px; border-radius: 12px; border: 2px solid var(--line); background: #fff; font-size: 16px; }
+.sub-check .btn { white-space: nowrap; }
+.sub-missing { color: var(--muted); }
+.lb { max-width: 100vw; max-height: 100vh; width: 100vw; height: 100vh; margin: 0; padding: 0; background: rgb(10 5 30 / .96); }
+.lb[open] { display: flex; flex-direction: column; }
+.lb-top { display: flex; gap: 8px; align-items: center; padding: 10px; color: #fff; font-weight: 800; }
+.lb-top span { flex: 1; overflow-wrap: anywhere; }
+.lb-stage { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; min-height: 0; padding: 0 8px 10px; }
+.lb-stage img { max-width: 100%; max-height: 100%; object-fit: contain; transition: transform .2s; background: #fff; }
+.lb-nav { position: absolute; top: 50%; transform: translateY(-50%); width: 52px; height: 72px; border: 0; border-radius: 14px;
+  background: rgb(255 255 255 / .18); color: #fff; font-size: 40px; cursor: pointer; z-index: 2; }
+#lb-prev { left: 10px; }
+#lb-next { right: 10px; }

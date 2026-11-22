@@ -295,3 +295,28 @@ dialog::backdrop { background: rgb(20 10 50 / .8); }
 .pin2-label { margin-top: 12px; }
 #pin-form label { display: block; font-weight: 800; margin-bottom: 8px; }
 .preview-note { background: var(--yellow); color: #4a3500; font-weight: 800; border-radius: 14px; padding: 10px 14px; margin-bottom: 14px; }
+
+/* ===== Фото домашней работы ===== */
+.mat .actions .btn.btn-hw { --c: var(--blue); --cd: var(--blue-d); color: #fff; flex-basis: 100%; }
+.hw-status { flex-basis: 100%; padding: 10px 12px; border-radius: 14px; background: #eaf5fe; color: var(--blue-d); font-weight: 800; display: grid; gap: 6px; }
+.hw-status .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hw-status .row .btn { margin-left: auto; }
+.hw-status.checked { background: #e9fbf1; color: var(--green-d); }
+.hw-status .fb { color: var(--ink); font-weight: 700; font-style: italic; }
+.hw-late { color: var(--coral-d); }
+.hw-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
+.hw-grid:empty { display: none; }
+.hw-thumb { position: relative; aspect-ratio: 3 / 4; border-radius: 12px; overflow: hidden; background: var(--soft); }
+.hw-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.hw-thumb button { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: 50%; border: 0;
+  background: rgb(0 0 0 / .6); color: #fff; font-size: 16px; cursor: pointer; }
+.hw-comment { width: 100%; padding: 8px 14px; border-radius: 14px; border: 2px solid var(--line); background: var(--soft); font-size: 16px; resize: vertical; }
+.hw-comment:focus { outline: none; border-color: var(--purple); background: #fff; }
+.progress { height: 12px; border-radius: 8px; background: var(--line); overflow: hidden; }
+.progress div { height: 100%; width: 0; background: var(--green); transition: width .2s; }
+.hw-progress { margin: 10px 0; }
+#hw-body .btn-blue { margin-bottom: 4px; }
+.hw-mine { display: flex; gap: 6px; }
+.hw-mine a { width: 44px; height: 44px; border-radius: 8px; overflow: hidden; display: block; }
+.hw-mine img { width: 100%; height: 100%; object-fit: cover; }
+.mat .actions .hw-status .btn, .mat .actions .quiz-done .btn { flex: 0 0 auto; --c: var(--soft); --cd: #d8d1f3; color: var(--ink); }

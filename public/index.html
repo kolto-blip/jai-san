@@ -112,6 +112,30 @@
     </form>
   </dialog>
 
+  <dialog id="hw-dlg">
+    <form class="modal quiz" id="hw-form" autocomplete="off" novalidate>
+      <div class="modal-head">
+        <h2 id="hw-title"></h2>
+        <button class="btn btn-coral btn-sm" id="hw-close" type="button">Жабу ✕</button>
+      </div>
+      <div id="hw-body">
+        <p class="hint" id="hw-due"></p>
+        <label class="quiz-label" for="hw-name" id="hw-name-label">Аты-жөніңіз</label>
+        <input id="hw-name" class="quiz-input quiz-name" maxlength="60" autocomplete="name" placeholder="Мысалы: Әлия Серікқызы">
+        <input type="file" id="hw-file" accept="image/*" multiple hidden>
+        <div class="hw-grid" id="hw-previews"></div>
+        <button class="btn btn-blue btn-block" type="button" id="hw-pick">📷 Суретке түсіру / таңдау</button>
+        <p class="hint">Дәптер бетін жарыққа қойып, тік түсіріңіз. 6 фотоға дейін.</p>
+        <label class="quiz-label" for="hw-comment">Пікір (міндетті емес)</label>
+        <textarea id="hw-comment" class="hw-comment" rows="2" maxlength="300" placeholder="Мысалы: №4-ті шығара алмадым"></textarea>
+        <div class="progress hw-progress" id="hw-progress" hidden><div id="hw-progress-fill"></div></div>
+        <div class="form-error" id="hw-error" role="alert"></div>
+        <button class="btn btn-green btn-block" type="submit" id="hw-submit">Жіберу ✓</button>
+      </div>
+      <div id="hw-done" hidden></div>
+    </form>
+  </dialog>
+
   <script src="/common.js"></script>
   <script src="/app.js"></script>
 </body>

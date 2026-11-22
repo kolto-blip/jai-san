@@ -77,6 +77,16 @@ export function createStorages(repo) {
         moved++;
         log(`  → #${m.id} «${m.fileName}» перенесён: ${src.name} → ${target.name}`);
       }
+      for (const f of await repo.listAllSubmissionFiles()) {
+        if (f.storage === target.name) continue;
+        const src = backends[f.storage];
+        if (!src) continue;
+        await target.put(f.storageKey, await src.get(f.storageKey));
+        await repo.setSubmissionFileStorage(f.id, target.name);
+        await src.del(f.storageKey).catch(() => {});
+        moved++;
+      }
+      if (moved) log(`  → барлығы тасымалданды (оқушы фотолары да): ${moved}`);
       return moved;
     },
   };

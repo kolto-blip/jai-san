@@ -52,6 +52,31 @@ CREATE TABLE IF NOT EXISTS students (
 );
 CREATE INDEX IF NOT EXISTS students_class ON students(class_id);
 ALTER TABLE results ADD COLUMN IF NOT EXISTS student_id integer REFERENCES students(id) ON DELETE SET NULL;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS hw jsonb;
+CREATE TABLE IF NOT EXISTS submissions (
+  id serial PRIMARY KEY,
+  material_id integer NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+  class_id integer NOT NULL,
+  student_id integer REFERENCES students(id) ON DELETE SET NULL,
+  name text NOT NULL,
+  comment text NOT NULL DEFAULT '',
+  status text NOT NULL DEFAULT 'new',
+  grade text NOT NULL DEFAULT '',
+  feedback text NOT NULL DEFAULT '',
+  created_at timestamptz NOT NULL DEFAULT now(),
+  checked_at timestamptz
+);
+CREATE INDEX IF NOT EXISTS submissions_material ON submissions(material_id);
+CREATE INDEX IF NOT EXISTS submissions_student ON submissions(student_id);
+CREATE TABLE IF NOT EXISTS submission_files (
+  id serial PRIMARY KEY,
+  submission_id integer NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+  storage text NOT NULL,
+  storage_key text NOT NULL,
+  size integer NOT NULL,
+  mime text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS submission_files_sub ON submission_files(submission_id);
 CREATE TABLE IF NOT EXISTS settings (
   key text PRIMARY KEY,
   value text NOT NULL
@@ -75,12 +100,18 @@ const toMaterial = (r) =>
     classIds: r.class_ids,
     date: r.mdate,
     quiz: r.quiz || null,
+    hw: r.hw || null,
     createdAt: r.created_at,
   };
 const toStudent = (r) => r && {
   id: r.id, classId: r.class_id, name: r.name, pinHash: r.pin_hash, pinVer: r.pin_ver,
   registered: Boolean(r.pin_hash), registeredAt: r.registered_at,
 };
+const toSubmission = (r) => ({
+  id: r.id, materialId: r.material_id, classId: r.class_id, studentId: r.student_id, name: r.name,
+  comment: r.comment, status: r.status, grade: r.grade, feedback: r.feedback, createdAt: r.created_at, checkedAt: r.checked_at,
+});
+const toSubFile = (r) => ({ id: r.id, submissionId: r.submission_id, storage: r.storage, storageKey: r.storage_key, size: r.size, mime: r.mime });
 const toResult = (r) => ({
   id: r.id, materialId: r.material_id, classId: r.class_id, name: r.name, nameKey: r.name_key,
   answers: r.answers, studentId: r.student_id ?? null, createdAt: r.created_at,
@@ -89,12 +120,12 @@ const toResult = (r) => ({
 const COLS = {
   title: 'title', topic: 'topic', kind: 'kind', url: 'url', fileName: 'file_name', fileMime: 'file_mime',
   fileSize: 'file_size', storage: 'storage', storageKey: 'storage_key', allClasses: 'all_classes',
-  classIds: 'class_ids', date: 'mdate', quiz: 'quiz',
+  classIds: 'class_ids', date: 'mdate', quiz: 'quiz', hw: 'hw',
 };
 
 // по казахскому алфавиту (Ә после А, а не после Я), независимо от настроек базы
 const byName = (a, b) => a.name.localeCompare(b.name, 'kk', { numeric: true }) || a.id - b.id;
-const val = (k, v) => (k === 'quiz' && v ? JSON.stringify(v) : v);
+const val = (k, v) => ((k === 'quiz' || k === 'hw') && v ? JSON.stringify(v) : v);
 
 export async function createPgRepo(connectionString) {
   // Neon даёт sslmode=require; pg и так проверяет сертификат полностью — пишем это явно, без предупреждения в логах.
@@ -251,8 +282,87 @@ export async function createPgRepo(connectionString) {
     async deleteStudent(id) {
       await q('DELETE FROM students WHERE id=$1', [id]);
     },
+    // ---------- фото домашних работ ----------
+    async createSubmission(sub, files) {
+      const { rows } = await q(
+        'INSERT INTO submissions(material_id,class_id,student_id,name,comment) VALUES($1,$2,$3,$4,$5) RETURNING *',
+        [sub.materialId, sub.classId, sub.studentId ?? null, sub.name, sub.comment || ''],
+      );
+      const out = toSubmission(rows[0]);
+      out.files = [];
+      for (const f of files) {
+        const r = await q(
+          'INSERT INTO submission_files(submission_id,storage,storage_key,size,mime) VALUES($1,$2,$3,$4,$5) RETURNING *',
+          [out.id, f.storage, f.storageKey, f.size, f.mime],
+        );
+        out.files.push(toSubFile(r.rows[0]));
+      }
+      return out;
+    },
+    async listSubmissions(where, params) {
+      const { rows } = await q(`SELECT * FROM submissions WHERE ${where} ORDER BY created_at`, params);
+      const subs = rows.map(toSubmission);
+      if (!subs.length) return subs;
+      const f = await q('SELECT * FROM submission_files WHERE submission_id = ANY($1) ORDER BY id', [subs.map((x) => x.id)]);
+      const by = {};
+      for (const r of f.rows) (by[r.submission_id] ||= []).push(toSubFile(r));
+      for (const x of subs) x.files = by[x.id] || [];
+      return subs;
+    },
+    async listSubmissionsForMaterial(materialId) {
+      return this.listSubmissions('material_id=$1', [materialId]);
+    },
+    async listSubmissionsForStudent(studentId) {
+      return this.listSubmissions('student_id=$1', [studentId]);
+    },
+    async getSubmission(id) {
+      return (await this.listSubmissions('id=$1', [id]))[0] || null;
+    },
+    async getSubmissionFile(id) {
+      const { rows } = await q(
+        'SELECT f.*, s.student_id, s.material_id FROM submission_files f JOIN submissions s ON s.id=f.submission_id WHERE f.id=$1', [id],
+      );
+      return rows[0] ? { ...toSubFile(rows[0]), studentId: rows[0].student_id, materialId: rows[0].material_id } : null;
+    },
+    async updateSubmission(id, { status, grade, feedback }) {
+      await q(
+        `UPDATE submissions SET status=$2, grade=$3, feedback=$4, checked_at=CASE WHEN $2='checked' THEN now() ELSE NULL END WHERE id=$1`,
+        [id, status, grade, feedback],
+      );
+    },
+    async deleteSubmission(id) {
+      const { rows } = await q('DELETE FROM submission_files WHERE submission_id=$1 RETURNING *', [id]);
+      await q('DELETE FROM submissions WHERE id=$1', [id]);
+      return rows.map(toSubFile);
+    },
+    async deleteSubmissionsForMaterial(materialId) {
+      const { rows } = await q(
+        'DELETE FROM submission_files WHERE submission_id IN (SELECT id FROM submissions WHERE material_id=$1) RETURNING *', [materialId],
+      );
+      await q('DELETE FROM submissions WHERE material_id=$1', [materialId]);
+      return rows.map(toSubFile);
+    },
+    async countSubmissions() {
+      const { rows } = await q(
+        "SELECT material_id, COUNT(*)::int AS total, COUNT(*) FILTER (WHERE status<>'checked')::int AS unchecked FROM submissions GROUP BY material_id",
+      );
+      return Object.fromEntries(rows.map((r) => [r.material_id, { total: r.total, unchecked: r.unchecked }]));
+    },
+    async listAllSubmissionFiles() {
+      const { rows } = await q('SELECT * FROM submission_files ORDER BY id');
+      return rows.map(toSubFile);
+    },
+    async setSubmissionFileStorage(id, storage) {
+      await q('UPDATE submission_files SET storage=$2 WHERE id=$1', [id, storage]);
+    },
     async usageBytes() {
-      const { rows } = await q('SELECT COALESCE(SUM(file_size),0)::bigint AS s FROM materials WHERE storage IS NOT NULL');
+      const { rows } = await q(`SELECT
+        (SELECT COALESCE(SUM(file_size),0) FROM materials WHERE storage IS NOT NULL) +
+        (SELECT COALESCE(SUM(size),0) FROM submission_files) AS s`);
+      return Number(rows[0].s);
+    },
+    async photoBytes() {
+      const { rows } = await q('SELECT COALESCE(SUM(size),0)::bigint AS s FROM submission_files');
       return Number(rows[0].s);
     },
     async close() {

@@ -5,7 +5,7 @@ import path from 'node:path';
 export async function createJsonRepo(dataDir) {
   await fs.mkdir(dataDir, { recursive: true });
   const file = path.join(dataDir, 'db.json');
-  let state = { seq: { classes: 0, materials: 0, results: 0, students: 0 }, classes: [], materials: [], results: [], students: [], settings: {} };
+  let state = { seq: { classes: 0, materials: 0, results: 0, students: 0, submissions: 0, subfiles: 0 }, classes: [], materials: [], results: [], students: [], submissions: [], subfiles: [], settings: {} };
   try {
     const loaded = JSON.parse(await fs.readFile(file, 'utf8'));
     state = { ...state, ...loaded, seq: { ...state.seq, ...loaded.seq } };
@@ -89,7 +89,7 @@ export async function createJsonRepo(dataDir) {
         fileName: m.fileName ?? null, fileMime: m.fileMime ?? null, fileSize: m.fileSize || 0,
         storage: m.storage ?? null, storageKey: m.storageKey ?? null,
         allClasses: Boolean(m.allClasses), classIds: m.classIds || [],
-        date: m.date, quiz: m.quiz ?? null, createdAt: new Date().toISOString(),
+        date: m.date, quiz: m.quiz ?? null, hw: m.hw ?? null, createdAt: new Date().toISOString(),
       };
       state.materials.push(rec);
       await save();
@@ -105,6 +105,9 @@ export async function createJsonRepo(dataDir) {
     async deleteMaterial(id) {
       state.materials = state.materials.filter((m) => m.id !== id);
       state.results = state.results.filter((r) => r.materialId !== id);
+      const subs = new Set(state.submissions.filter((x) => x.materialId === id).map((x) => x.id));
+      state.submissions = state.submissions.filter((x) => !subs.has(x.id));
+      state.subfiles = state.subfiles.filter((f) => !subs.has(f.submissionId));
       await save();
     },
     async listResults(materialId) {
@@ -185,10 +188,82 @@ export async function createJsonRepo(dataDir) {
     async deleteStudent(id) {
       state.students = state.students.filter((s) => s.id !== id);
       for (const r of state.results) if (r.studentId === id) r.studentId = null;
+      for (const r of state.submissions) if (r.studentId === id) r.studentId = null;
+      await save();
+    },
+
+    // ---------- фото домашних работ ----------
+    async createSubmission(sub, files) {
+      const rec = {
+        id: ++state.seq.submissions, materialId: sub.materialId, classId: sub.classId, studentId: sub.studentId ?? null,
+        name: sub.name, comment: sub.comment || '', status: 'new', grade: '', feedback: '',
+        createdAt: new Date().toISOString(), checkedAt: null,
+      };
+      state.submissions.push(rec);
+      const fl = files.map((f) => ({ id: ++state.seq.subfiles, submissionId: rec.id, storage: f.storage, storageKey: f.storageKey, size: f.size, mime: f.mime }));
+      state.subfiles.push(...fl);
+      await save();
+      return { ...clone(rec), files: clone(fl) };
+    },
+    withFiles(list) {
+      return clone(list).map((x) => ({ ...x, files: clone(state.subfiles.filter((f) => f.submissionId === x.id)) }));
+    },
+    async listSubmissionsForMaterial(materialId) {
+      return this.withFiles(state.submissions.filter((x) => x.materialId === materialId));
+    },
+    async listSubmissionsForStudent(studentId) {
+      return this.withFiles(state.submissions.filter((x) => x.studentId === studentId));
+    },
+    async getSubmission(id) {
+      return this.withFiles(state.submissions.filter((x) => x.id === id))[0] || null;
+    },
+    async getSubmissionFile(id) {
+      const f = state.subfiles.find((x) => x.id === id);
+      const sub = f && state.submissions.find((x) => x.id === f.submissionId);
+      return f && sub ? { ...clone(f), studentId: sub.studentId, materialId: sub.materialId } : null;
+    },
+    async updateSubmission(id, { status, grade, feedback }) {
+      const x = state.submissions.find((s) => s.id === id);
+      if (x) Object.assign(x, { status, grade, feedback, checkedAt: status === 'checked' ? new Date().toISOString() : null });
+      await save();
+    },
+    async deleteSubmission(id) {
+      const files = state.subfiles.filter((f) => f.submissionId === id);
+      state.subfiles = state.subfiles.filter((f) => f.submissionId !== id);
+      state.submissions = state.submissions.filter((x) => x.id !== id);
+      await save();
+      return clone(files);
+    },
+    async deleteSubmissionsForMaterial(materialId) {
+      const subs = new Set(state.submissions.filter((x) => x.materialId === materialId).map((x) => x.id));
+      const files = state.subfiles.filter((f) => subs.has(f.submissionId));
+      state.subfiles = state.subfiles.filter((f) => !subs.has(f.submissionId));
+      state.submissions = state.submissions.filter((x) => !subs.has(x.id));
+      await save();
+      return clone(files);
+    },
+    async countSubmissions() {
+      const out = {};
+      for (const x of state.submissions) {
+        const c = (out[x.materialId] ||= { total: 0, unchecked: 0 });
+        c.total++;
+        if (x.status !== 'checked') c.unchecked++;
+      }
+      return out;
+    },
+    async listAllSubmissionFiles() {
+      return clone(state.subfiles);
+    },
+    async setSubmissionFileStorage(id, storage) {
+      const f = state.subfiles.find((x) => x.id === id);
+      if (f) f.storage = storage;
       await save();
     },
     async usageBytes() {
-      return state.materials.reduce((s, m) => s + (m.storage ? m.fileSize : 0), 0);
+      return state.materials.reduce((s, m) => s + (m.storage ? m.fileSize : 0), 0) + state.subfiles.reduce((s, f) => s + f.size, 0);
+    },
+    async photoBytes() {
+      return state.subfiles.reduce((s, f) => s + f.size, 0);
     },
     async close() {
       await writing;
