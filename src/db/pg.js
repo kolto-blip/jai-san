@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS submission_files (
   mime text NOT NULL
 );
 CREATE INDEX IF NOT EXISTS submission_files_sub ON submission_files(submission_id);
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS ai jsonb;
 CREATE TABLE IF NOT EXISTS settings (
   key text PRIMARY KEY,
   value text NOT NULL
@@ -110,6 +111,7 @@ const toStudent = (r) => r && {
 const toSubmission = (r) => ({
   id: r.id, materialId: r.material_id, classId: r.class_id, studentId: r.student_id, name: r.name,
   comment: r.comment, status: r.status, grade: r.grade, feedback: r.feedback, createdAt: r.created_at, checkedAt: r.checked_at,
+  ai: r.ai || null,
 });
 const toSubFile = (r) => ({ id: r.id, submissionId: r.submission_id, storage: r.storage, storageKey: r.storage_key, size: r.size, mime: r.mime });
 const toResult = (r) => ({
@@ -329,6 +331,9 @@ export async function createPgRepo(connectionString) {
         `UPDATE submissions SET status=$2, grade=$3, feedback=$4, checked_at=CASE WHEN $2='checked' THEN now() ELSE NULL END WHERE id=$1`,
         [id, status, grade, feedback],
       );
+    },
+    async setSubmissionAi(id, ai) {
+      await q('UPDATE submissions SET ai=$2 WHERE id=$1', [id, JSON.stringify(ai)]);
     },
     async deleteSubmission(id) {
       const { rows } = await q('DELETE FROM submission_files WHERE submission_id=$1 RETURNING *', [id]);

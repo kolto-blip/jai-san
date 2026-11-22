@@ -10,6 +10,33 @@ import net from 'node:net';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
+// Поддельный Anthropic API: запоминает запросы, отвечает готовой проверкой
+const fakeAi = { requests: [], port: 0 };
+const AI_RESULT = {
+  legible: true,
+  problems: [
+    { number: '1', verdict: 'correct', note: 'Дұрыс' },
+    { number: '2', verdict: 'error', note: 'Жақшаны ашқанда таңба қате' },
+  ],
+  grade: '4', feedback: '№2-де жақшаны ашуды қайтала', summary: '№2-ні қараңыз',
+};
+const fakeAiServer = (await import('node:http')).createServer((req, res) => {
+  let body = '';
+  req.on('data', (c) => (body += c));
+  req.on('end', () => {
+    fakeAi.requests.push({ url: req.url, headers: req.headers, body: JSON.parse(body) });
+    res.writeHead(200, { 'content-type': 'application/json', 'request-id': 'req_test' });
+    res.end(JSON.stringify({
+      id: 'msg_test', type: 'message', role: 'assistant', model: 'claude-opus-5-5',
+      content: [{ type: 'text', text: JSON.stringify(AI_RESULT) }],
+      stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 100, output_tokens: 50 },
+    }));
+  });
+});
+await new Promise((r) => fakeAiServer.listen(0, '127.0.0.1', r));
+fakeAi.port = fakeAiServer.address().port;
+after(() => fakeAiServer.close());
+
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PIN = '4321';
 
@@ -86,7 +113,10 @@ function suite(label, makeEnv) {
     before(async () => {
       env = await makeEnv();
       execFileSync(process.execPath, ['scripts/seed.js'], { cwd: ROOT, env: { PATH: process.env.PATH, ...env } });
-      srv = await startServer({ ADMIN_PIN: PIN, CODE_MAX_FAILS: '6', PIN_MAX_FAILS: '4', ...env });
+      srv = await startServer({
+        ADMIN_PIN: PIN, CODE_MAX_FAILS: '6', PIN_MAX_FAILS: '4',
+        ANTHROPIC_API_KEY: 'sk-test-fake', ANTHROPIC_BASE_URL: `http://127.0.0.1:${fakeAi.port}`, ...env,
+      });
       const a = admin();
       assert.equal((await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } })).status, 200);
       const ov = await (await a.req('/api/admin/overview')).json();
@@ -430,6 +460,63 @@ function suite(label, makeEnv) {
       assert.equal((await a.req(`/api/admin/materials/${hwMat.id}`, { method: 'DELETE' })).status, 200);
       assert.equal((await a.req(sub.files[0].url)).status, 404);
       assert.equal((await (await a.req('/api/admin/overview')).json()).usage.photoBytes, 0);
+    });
+
+    test('AI-проверка фото: что уходит в Anthropic API и что получает учитель', async () => {
+      const a = admin();
+      await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      assert.deepEqual((await (await a.req('/api/admin/overview')).json()).ai, { enabled: true, model: 'claude-opus-5-5' });
+      // приём фото у PDF-задания 8Ғ
+      const pdf = mats[PDF_8G];
+      const upd = await a.req(`/api/admin/materials/${pdf.id}`, { method: 'PUT', json: { hw: { open: true, aiNote: '5 баллдық жүйе' } } });
+      assert.equal(upd.status, 200);
+      const s = client(srv.base);
+      await s.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      const jpg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from('дәптер')]);
+      const sent = await s.req(`/api/hw/${pdf.id}`, {
+        method: 'POST', body: Buffer.concat([jpg, jpg]),
+        headers: { 'x-parts': `${jpg.length},${jpg.length}`, 'x-meta': encodeURIComponent(JSON.stringify({ name: 'Құпия Есімов', comment: '№2 қиын болды' })) },
+      });
+      assert.equal(sent.status, 200);
+      const subs = await (await a.req(`/api/admin/materials/${pdf.id}/submissions`)).json();
+      const sub = subs.submissions[0];
+      assert.equal(sub.ai, null);
+
+      // ученик не может запустить AI-проверку
+      assert.equal((await s.req(`/api/admin/submissions/${sub.id}/ai`, { method: 'POST', headers: { 'x-req': '1' } })).status, 401);
+
+      fakeAi.requests.length = 0;
+      const r = await a.req(`/api/admin/submissions/${sub.id}/ai`, { method: 'POST' });
+      assert.equal(r.status, 200, await r.clone().text());
+      const ai = await r.json();
+      assert.equal(ai.grade, '4');
+      assert.deepEqual(ai.problems.map((p) => p.verdict), ['correct', 'error']);
+
+      // запрос в API: модель, схема ответа, запасной вариант при отказе, PDF задания и оба фото; имени ученика нет
+      assert.equal(fakeAi.requests.length, 1);
+      const q = fakeAi.requests[0];
+      assert.equal(q.url.split('?')[0], '/v1/messages');
+      assert.match(q.headers['anthropic-beta'], /server-side-fallback-2026-07-01/);
+      assert.equal(q.body.model, 'claude-opus-5-5');
+      assert.equal(q.body.fallbacks, 'default');
+      assert.equal(q.body.output_config.format.type, 'json_schema');
+      assert.equal(q.body.output_config.effort, 'medium');
+      const blocks = q.body.messages[0].content;
+      assert.equal(blocks.filter((b) => b.type === 'image').length, 2);
+      assert.equal(blocks[0].type, 'document');
+      assert.equal(Buffer.from(blocks[0].source.data, 'base64').subarray(0, 5).toString(), '%PDF-');
+      const text = JSON.stringify(q.body);
+      assert.ok(text.includes('5 баллдық жүйе'), 'указание учителя передаётся');
+      assert.ok(!text.includes('Құпия') && !text.includes('Есімов'), 'имя ученика не отправляется');
+
+      // результат сохранён у работы; ученику до подтверждения учителем ничего не видно
+      const again = await (await a.req(`/api/admin/materials/${pdf.id}/submissions`)).json();
+      assert.equal(again.submissions[0].ai.feedback, '№2-де жақшаны ашуды қайтала');
+      const pub = JSON.stringify(await (await s.req('/api/materials')).json());
+      assert.ok(!pub.includes('жақшаны ашуды'), 'AI-ұсыныс оқушыға көрінбейді');
+
+      await a.req(`/api/admin/materials/${pdf.id}/submissions`, { method: 'DELETE' });
+      await a.req(`/api/admin/materials/${pdf.id}`, { method: 'PUT', json: { hw: null } });
     });
 
     test('подбор кода класса блокируется по IP', async () => {

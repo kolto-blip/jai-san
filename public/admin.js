@@ -38,7 +38,7 @@ $('#logout').addEventListener('click', async () => {
 
 async function refresh() {
   const data = await api('/api/admin/overview');
-  Object.assign(S, { classes: data.classes, materials: data.materials, usage: data.usage, baseUrl: data.baseUrl });
+  Object.assign(S, { classes: data.classes, materials: data.materials, usage: data.usage, baseUrl: data.baseUrl, ai: data.ai });
   renderUsage();
   renderClassPicks();
   renderClasses();
@@ -283,6 +283,7 @@ function editMaterial(m) {
     $('#hw-on').checked = true;
     $('#hw-open').checked = m.hw.open;
     $('#hw-due').value = m.hw.due || '';
+    $('#hw-ainote').value = m.hw.aiNote || '';
     $('#hw-key').open = true;
     $('#hw-key').classList.add('has-key');
   }
@@ -308,7 +309,7 @@ function formMeta() {
     allClasses: $('#all-classes').checked,
     classIds: [...document.querySelectorAll('#class-picks input:checked')].map((i) => Number(i.value)),
     quiz: quizMeta(),
-    hw: $('#hw-on').checked ? { open: $('#hw-open').checked, due: $('#hw-due').value || null } : null,
+    hw: $('#hw-on').checked ? { open: $('#hw-open').checked, due: $('#hw-due').value || null, aiNote: $('#hw-ainote').value.trim() } : null,
   };
 }
 
@@ -621,6 +622,10 @@ function renderSubs() {
     ${unchecked ? `<span class="tag tag-hw">Тексерілмеген: ${unchecked}</span>` : '<span class="tag tag-quiz">Бәрі тексерілді</span>'}
     ${missing.length ? `<span class="tag tag-none">Жібермегендер: ${missing.length}</span>` : ''}
     ${SB.data.material.due ? `<span class="tag">Мерзімі: ${fmtDate(SB.data.material.due)}</span>` : ''}`;
+  const todo = SB.data.submissions.filter((x) => (!cf || x.classId === cf) && !x.ai && x.status !== 'checked');
+  $('#sub-ai-all').hidden = !S.ai?.enabled || !todo.length;
+  $('#sub-ai-all').textContent = `🤖 Барлығын AI-мен тексеру (${todo.length})`;
+  if (!S.ai?.enabled) $('#sub-summary').insertAdjacentHTML('beforeend', '<span class="tag ai-off">🤖 AI өшірулі — Render-де ANTHROPIC_API_KEY қосыңыз</span>');
   SB.photos = [];
   const fmtT = (t) => new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   $('#sub-list').innerHTML = (subs.map((x) => {
@@ -633,15 +638,66 @@ function renderSubs() {
         ${x.late ? '<span class="tag tag-none">кешігіп</span>' : ''}${x.status === 'checked' ? '<span class="tag tag-quiz">✅ тексерілді</span>' : ''}</div>
       ${x.comment ? `<div class="sub-comment">«${esc(x.comment)}»</div>` : ''}
       <div class="sub-photos">${ph}</div>
+      ${aiBox(x)}
       <div class="sub-check">
         <input data-f="grade" maxlength="20" placeholder="Баға" value="${esc(x.grade)}" aria-label="Баға">
         <input data-f="feedback" maxlength="300" placeholder="Оқушыға пікір (міндетті емес)" value="${esc(x.feedback)}" aria-label="Пікір">
+        ${S.ai?.enabled ? `<button class="btn btn-purple btn-sm" data-sb="ai">🤖 ${x.ai ? 'Қайта AI' : 'AI тексеру'}</button>` : ''}
         <button class="btn btn-green btn-sm" data-sb="check">✅ Тексерілді</button>
         <button class="btn btn-coral btn-sm" data-sb="del" aria-label="Жою">🗑</button>
       </div></div>`;
   }).join('') || '<div class="empty res-empty"><div class="big-emoji">📭</div>Әзірге жұмыс жоқ</div>') +
     (missing.length ? `<div class="sub sub-missing"><b>Жібермегендер:</b> ${missing.map((x) => esc(x.name) + (cf ? '' : ` (${esc(x.className)})`)).join(', ')}</div>` : '');
 }
+
+const VERDICT = { correct: '✅', error: '❌', unclear: '❓', missing: '➖' };
+
+function aiBox(x) {
+  const a = x.ai;
+  if (!a) return '';
+  return `<div class="ai-box">
+    <div class="ai-head">🤖 AI ұсынысы${a.grade ? ` · Баға: <b>${esc(a.grade)}</b>` : ''}
+      <button class="btn btn-light btn-sm" data-sb="ai-apply" type="button">Ұсынысты қою ↓</button></div>
+    ${a.legible ? '' : '<div class="ai-warn">⚠️ Фото анық емес — өзіңіз мұқият қараңыз</div>'}
+    <ul class="ai-list">${a.problems.map((p) => `<li><b>${VERDICT[p.verdict] || '❓'} №${esc(p.number)}</b> ${esc(p.note)}</li>`).join('')}</ul>
+    ${a.summary ? `<div class="ai-sum">${esc(a.summary)}</div>` : ''}
+    ${a.feedback ? `<div class="ai-sum">Оқушыға: «${esc(a.feedback)}»</div>` : ''}
+    <div class="ai-meta">AI қателесуі мүмкін — тексеріп барып «Тексерілді» басыңыз.</div>
+  </div>`;
+}
+
+async function runAi(id, btn) {
+  btn?.classList.add('busy');
+  if (btn) btn.textContent = '🤖 Тексерілуде…';
+  try {
+    const ai = await api(`/api/admin/submissions/${id}/ai`, { method: 'POST' });
+    const x = SB.data.submissions.find((s) => String(s.id) === String(id));
+    if (x) x.ai = ai;
+    return true;
+  } catch (err) {
+    toast(err.message, true);
+    return false;
+  } finally {
+    btn?.classList.remove('busy');
+  }
+}
+
+$('#sub-ai-all').addEventListener('click', async () => {
+  const cf = Number($('#sub-class').value) || 0;
+  const todo = SB.data.submissions.filter((x) => (!cf || x.classId === cf) && !x.ai && x.status !== 'checked');
+  const btn = $('#sub-ai-all');
+  btn.classList.add('busy');
+  let done = 0;
+  for (const x of todo) {
+    btn.textContent = `🤖 ${done + 1}/${todo.length} тексерілуде…`;
+    if (!(await runAi(x.id))) break;
+    done++;
+    renderSubs();
+  }
+  btn.classList.remove('busy');
+  renderSubs();
+  if (done) toast(`AI тексерді: ${done}. Ұсыныстарды қарап, «Тексерілді» басыңыз.`);
+});
 
 $('#sub-class').addEventListener('change', renderSubs);
 $('#sub-new').addEventListener('change', renderSubs);
@@ -655,6 +711,17 @@ $('#sub-list').addEventListener('click', async (e) => {
   if (!b) return;
   const card = b.closest('[data-sub]');
   const id = card.dataset.sub;
+  if (b.dataset.sb === 'ai') {
+    if (await runAi(id, b)) renderSubs();
+    return;
+  }
+  if (b.dataset.sb === 'ai-apply') {
+    const ai = SB.data.submissions.find((s) => String(s.id) === id).ai;
+    card.querySelector('[data-f=grade]').value = ai.grade;
+    card.querySelector('[data-f=feedback]').value = ai.feedback;
+    card.querySelector('[data-f=grade]').focus();
+    return;
+  }
   try {
     if (b.dataset.sb === 'check') {
       await api(`/api/admin/submissions/${id}`, {

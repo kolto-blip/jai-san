@@ -117,6 +117,10 @@
                 <input id="hw-due" type="date">
                 <p class="hint">Мерзімнен кейін де қабылданады, бірақ «кешігіп» деп белгіленеді.</p>
               </div>
+              <div class="span-all">
+                <label for="hw-ainote">🤖 AI үшін нұсқау (міндетті емес)</label>
+                <textarea id="hw-ainote" rows="2" maxlength="500" placeholder="Мысалы: 10 баллдық жүйемен бағала; №5 — қосымша есеп, қатесі бағаны түсірмейді"></textarea>
+              </div>
             </div>
           </details>
 
@@ -212,6 +216,7 @@
       <div class="res-tools">
         <select id="sub-class" aria-label="Сынып"></select>
         <label class="pick"><input type="checkbox" id="sub-new"><span>Тек тексерілмегендер</span></label>
+        <button class="btn btn-purple btn-sm" id="sub-ai-all" type="button" hidden>🤖 Барлығын AI-мен тексеру</button>
         <button class="btn btn-light btn-sm" id="sub-clear" type="button">🗑 Барлық фотоны жою</button>
       </div>
       <div class="res-summary" id="sub-summary"></div>

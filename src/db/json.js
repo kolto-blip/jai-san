@@ -196,7 +196,7 @@ export async function createJsonRepo(dataDir) {
     async createSubmission(sub, files) {
       const rec = {
         id: ++state.seq.submissions, materialId: sub.materialId, classId: sub.classId, studentId: sub.studentId ?? null,
-        name: sub.name, comment: sub.comment || '', status: 'new', grade: '', feedback: '',
+        name: sub.name, comment: sub.comment || '', status: 'new', grade: '', feedback: '', ai: null,
         createdAt: new Date().toISOString(), checkedAt: null,
       };
       state.submissions.push(rec);
@@ -225,6 +225,11 @@ export async function createJsonRepo(dataDir) {
     async updateSubmission(id, { status, grade, feedback }) {
       const x = state.submissions.find((s) => s.id === id);
       if (x) Object.assign(x, { status, grade, feedback, checkedAt: status === 'checked' ? new Date().toISOString() : null });
+      await save();
+    },
+    async setSubmissionAi(id, ai) {
+      const x = state.submissions.find((s) => s.id === id);
+      if (x) x.ai = ai;
       await save();
     },
     async deleteSubmission(id) {

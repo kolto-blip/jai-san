@@ -10,6 +10,7 @@ import { createStorages } from './storage/index.js';
 import { createAuth, adminMode } from './auth.js';
 import { FailureLimiter } from './ratelimit.js';
 import { grade, nameKey } from './grade.js';
+import { aiConfig, checkHomework, AiError } from './ai.js';
 import {
   HttpError, readBody, readJson, sendJson, parseCookies, cookie, clientIp, generateCode, normalizeCode,
   validManualCode, FILE_TYPES, fileExt, cleanFileName, contentDisposition, safeHttpUrl, youtubeId, todayISO,
@@ -145,7 +146,7 @@ export async function createApp() {
     if (!h) return null;
     const due = h.due ? String(h.due) : null;
     if (due && !validDate(due)) throw new HttpError(400, 'Мерзімі қате');
-    return { open: h.open !== false, due };
+    return { open: h.open !== false, due, aiNote: String(h.aiNote || '').trim().slice(0, 500) };
   }
 
   // сдано после конца дня срока (по времени школы)
@@ -424,6 +425,7 @@ export async function createApp() {
       materials: materials.map((m) => adminMaterial(m, resultCounts, subCounts)),
       usage: { usedBytes: used, photoBytes, limitMb: storages.limitMb, storage: storages.active.name, maxFileMb: config.maxFileBytes / 1048576 },
       baseUrl: baseUrl(req),
+      ai: { enabled: aiConfig.enabled, model: aiConfig.model },
     });
   });
 
@@ -624,7 +626,7 @@ export async function createApp() {
     const subs = (await repo.listSubmissionsForMaterial(m.id)).map((x) => ({
       id: x.id, name: students[x.studentId]?.name || x.name, classId: x.classId, className: names[x.classId] || '—',
       studentId: x.studentId, comment: x.comment, status: x.status, grade: x.grade, feedback: x.feedback,
-      createdAt: x.createdAt, late: isLate(x.createdAt, m.hw?.due),
+      createdAt: x.createdAt, late: isLate(x.createdAt, m.hw?.due), ai: x.ai || null,
       files: x.files.map((f) => ({ id: f.id, size: f.size, url: `/hw/photo/${f.id}` })),
     }));
     const done = new Set(subs.map((x) => x.studentId).filter(Boolean));
@@ -642,6 +644,30 @@ export async function createApp() {
       feedback: String(b.feedback || '').trim().slice(0, 300),
     });
     sendJson(res, 200, { ok: true });
+  });
+
+  // Проверка работы ИИ: результат — только подсказка учителю, ученику не показывается
+  route('POST', /^\/api\/admin\/submissions\/(\d+)\/ai$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    if (!aiConfig.enabled) throw new HttpError(503, 'AI қосылмаған: Render баптауларында ANTHROPIC_API_KEY қосыңыз.');
+    const sub = await repo.getSubmission(Number(id));
+    if (!sub) throw new HttpError(404, 'Жұмыс табылмады');
+    const m = await repo.getMaterial(sub.materialId);
+    const photos = [];
+    for (const f of sub.files) photos.push({ buf: await storages.get(f.storage).get(f.storageKey), mime: f.mime });
+    const taskPdf = m.storage && fileExt(m.fileName) === 'pdf' ? await storages.get(m.storage).get(m.storageKey) : null;
+    let ai;
+    try {
+      ai = await checkHomework({
+        title: m.title, taskPdf, answerKey: m.quiz?.answers || null,
+        teacherNote: m.hw?.aiNote || '', studentComment: sub.comment, photos,
+      });
+    } catch (e) {
+      if (e instanceof AiError) throw new HttpError(502, e.message);
+      throw e;
+    }
+    await repo.setSubmissionAi(sub.id, ai);
+    sendJson(res, 200, ai);
   });
 
   route('DELETE', /^\/api\/admin\/submissions\/(\d+)$/, async (req, res, [id]) => {
