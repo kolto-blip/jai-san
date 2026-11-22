@@ -271,3 +271,27 @@ dialog::backdrop { background: rgb(20 10 50 / .8); }
 .quiz-mark small { display: block; font-weight: 700; color: var(--muted); }
 .quiz .row { display: flex; gap: 10px; flex-wrap: wrap; }
 .quiz .row .btn { flex: 1; }
+
+/* ===== Вход ученика ===== */
+.who-list { display: grid; grid-template-columns: 1fr; gap: 10px; }
+@media (min-width: 680px) { .who-list { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 1020px) { .who-list { grid-template-columns: repeat(3, 1fr); } }
+.who {
+  display: flex; align-items: center; gap: 12px; min-height: 60px; padding: 8px 14px; border: 0; border-radius: 18px;
+  background: #fff; color: var(--ink); text-align: left; cursor: pointer; box-shadow: 0 5px 0 rgb(0 0 0 / .18);
+  font-weight: 800; font-size: 17px;
+}
+.who:active { transform: translateY(3px); box-shadow: 0 2px 0 rgb(0 0 0 / .18); }
+.who-av { width: 40px; height: 40px; flex: 0 0 40px; border-radius: 12px; display: grid; place-items: center;
+  background: var(--purple); color: #fff; font-weight: 900; }
+.who:nth-child(4n+2) .who-av { background: var(--blue); }
+.who:nth-child(4n+3) .who-av { background: var(--coral); }
+.who:nth-child(4n+4) .who-av { background: var(--green); }
+.who-name { flex: 1; overflow-wrap: anywhere; }
+.who-st .badge-new { margin: 0; }
+.who-help { color: rgb(255 255 255 / .7); text-align: center; margin-top: 18px; }
+.who-msg { color: var(--yellow); }
+.pin-name { font-size: 24px; font-weight: 900; margin: 14px 0 4px; }
+.pin2-label { margin-top: 12px; }
+#pin-form label { display: block; font-weight: 800; margin-bottom: 8px; }
+.preview-note { background: var(--yellow); color: #4a3500; font-weight: 800; border-radius: 14px; padding: 10px 14px; margin-bottom: 14px; }

@@ -41,6 +41,17 @@ CREATE TABLE IF NOT EXISTS results (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS results_material ON results(material_id);
+CREATE TABLE IF NOT EXISTS students (
+  id serial PRIMARY KEY,
+  class_id integer NOT NULL REFERENCES classes(id) ON DELETE CASCADE,
+  name text NOT NULL,
+  pin_hash text,
+  pin_ver integer NOT NULL DEFAULT 0,
+  registered_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS students_class ON students(class_id);
+ALTER TABLE results ADD COLUMN IF NOT EXISTS student_id integer REFERENCES students(id) ON DELETE SET NULL;
 CREATE TABLE IF NOT EXISTS settings (
   key text PRIMARY KEY,
   value text NOT NULL
@@ -66,9 +77,13 @@ const toMaterial = (r) =>
     quiz: r.quiz || null,
     createdAt: r.created_at,
   };
+const toStudent = (r) => r && {
+  id: r.id, classId: r.class_id, name: r.name, pinHash: r.pin_hash, pinVer: r.pin_ver,
+  registered: Boolean(r.pin_hash), registeredAt: r.registered_at,
+};
 const toResult = (r) => ({
   id: r.id, materialId: r.material_id, classId: r.class_id, name: r.name, nameKey: r.name_key,
-  answers: r.answers, createdAt: r.created_at,
+  answers: r.answers, studentId: r.student_id ?? null, createdAt: r.created_at,
 });
 
 const COLS = {
@@ -77,6 +92,8 @@ const COLS = {
   classIds: 'class_ids', date: 'mdate', quiz: 'quiz',
 };
 
+// по казахскому алфавиту (Ә после А, а не после Я), независимо от настроек базы
+const byName = (a, b) => a.name.localeCompare(b.name, 'kk', { numeric: true }) || a.id - b.id;
 const val = (k, v) => (k === 'quiz' && v ? JSON.stringify(v) : v);
 
 export async function createPgRepo(connectionString) {
@@ -105,8 +122,8 @@ export async function createPgRepo(connectionString) {
     },
 
     async listClasses() {
-      const { rows } = await q('SELECT * FROM classes ORDER BY name, id');
-      return rows.map(toClass);
+      const { rows } = await q('SELECT * FROM classes');
+      return rows.map(toClass).sort(byName);
     },
     async getClass(id) {
       const { rows } = await q('SELECT * FROM classes WHERE id=$1', [id]);
@@ -181,8 +198,8 @@ export async function createPgRepo(connectionString) {
     },
     async createResult(r) {
       const { rows } = await q(
-        'INSERT INTO results(material_id,class_id,name,name_key,answers) VALUES($1,$2,$3,$4,$5) RETURNING *',
-        [r.materialId, r.classId, r.name, r.nameKey, JSON.stringify(r.answers)],
+        'INSERT INTO results(material_id,class_id,name,name_key,answers,student_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING *',
+        [r.materialId, r.classId, r.name, r.nameKey, JSON.stringify(r.answers), r.studentId ?? null],
       );
       return toResult(rows[0]);
     },
@@ -191,6 +208,48 @@ export async function createPgRepo(connectionString) {
     },
     async deleteResults(materialId) {
       await q('DELETE FROM results WHERE material_id=$1', [materialId]);
+    },
+    async hasResultByStudent(materialId, studentId) {
+      const { rows } = await q('SELECT 1 FROM results WHERE material_id=$1 AND student_id=$2 LIMIT 1', [materialId, studentId]);
+      return rows.length > 0;
+    },
+    async listResultsForStudent(studentId) {
+      const { rows } = await q('SELECT * FROM results WHERE student_id=$1 ORDER BY created_at', [studentId]);
+      return rows.map(toResult);
+    },
+
+    // ---------- ученики ----------
+    async listStudents(classId) {
+      const { rows } = await q('SELECT * FROM students WHERE class_id=$1', [classId]);
+      return rows.map(toStudent).sort(byName);
+    },
+    async countStudents() {
+      const { rows } = await q('SELECT class_id, COUNT(*)::int AS total, COUNT(pin_hash)::int AS registered FROM students GROUP BY class_id');
+      return Object.fromEntries(rows.map((r) => [r.class_id, { total: r.total, registered: r.registered }]));
+    },
+    async getStudent(id) {
+      const { rows } = await q('SELECT * FROM students WHERE id=$1', [id]);
+      return toStudent(rows[0]) || null;
+    },
+    async addStudents(classId, names) {
+      for (const name of names) await q('INSERT INTO students(class_id,name) VALUES($1,$2)', [classId, name]);
+    },
+    async renameStudent(id, name) {
+      await q('UPDATE students SET name=$2 WHERE id=$1', [id, name]);
+    },
+    // первый вход: PIN ставится, только если его ещё нет (защита от гонки)
+    async claimStudent(id, pinHash) {
+      const { rows } = await q(
+        'UPDATE students SET pin_hash=$2, registered_at=now() WHERE id=$1 AND pin_hash IS NULL RETURNING *',
+        [id, pinHash],
+      );
+      return toStudent(rows[0]) || null;
+    },
+    async resetStudent(id) {
+      await q('UPDATE students SET pin_hash=NULL, registered_at=NULL, pin_ver=pin_ver+1 WHERE id=$1', [id]);
+    },
+    async deleteStudent(id) {
+      await q('DELETE FROM students WHERE id=$1', [id]);
     },
     async usageBytes() {
       const { rows } = await q('SELECT COALESCE(SUM(file_size),0)::bigint AS s FROM materials WHERE storage IS NOT NULL');

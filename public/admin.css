@@ -144,3 +144,18 @@
 .pct-low { color: var(--coral-d); }
 .del-res { border: 0; background: none; cursor: pointer; font-size: 18px; min-width: 40px; min-height: 40px; }
 .res-empty { color: var(--muted); }
+
+/* Списки учеников */
+.stu { max-width: 760px; margin: 0 auto; }
+.stu-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.stu-list { display: grid; gap: 8px; max-height: 50vh; overflow-y: auto; margin-bottom: 12px; }
+.srow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 14px; background: var(--soft); }
+.srow .nm { flex: 1; min-width: 140px; font-weight: 800; overflow-wrap: anywhere; }
+.srow .st { font-size: 14px; font-weight: 700; color: var(--muted); }
+.srow .st.ok { color: var(--green-d); }
+.stu-add { border: 2px solid var(--line); border-radius: 16px; padding: 0 14px; }
+.stu-add[open] { padding-bottom: 14px; }
+.stu-add summary { cursor: pointer; padding: 12px 0; font-weight: 800; }
+.stu-add label { display: block; font-weight: 800; margin-bottom: 6px; font-size: 15px; }
+.stu-add textarea { width: 100%; padding: 10px 14px; border-radius: 14px; border: 2px solid var(--line); background: var(--soft); font-size: 17px; line-height: 1.5; }
+.res-wrap tr.missing td { color: var(--muted); background: #fafafa; }

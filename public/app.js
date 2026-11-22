@@ -10,13 +10,23 @@ const store = {
 };
 
 function show(id) {
-  for (const s of ['join', 'main', 'loading']) $('#' + s).hidden = s !== id;
+  for (const s of ['join', 'who', 'pin', 'main', 'loading']) $('#' + s).hidden = s !== id;
 }
 
 async function join(code) {
   const data = await api('/api/join', { method: 'POST', body: { code } });
   store.set(data.code);
   return data;
+}
+
+// Открыть материалы класса; если у класса есть список учеников — сначала выбор имени и PIN.
+async function openClass() {
+  try {
+    render(await api('/api/materials'));
+  } catch (e) {
+    if (e.data?.needLogin) return showWho();
+    throw e;
+  }
 }
 
 async function load() {
@@ -33,7 +43,7 @@ async function load() {
   }
   // 2) кука на сервере; 3) запасной вариант — код в памяти телефона
   try {
-    return render(await api('/api/materials'));
+    return await openClass();
   } catch (e) {
     if (e.status !== 401) return showJoin(e.message);
   }
@@ -41,7 +51,7 @@ async function load() {
   if (saved) {
     try {
       await join(saved);
-      return render(await api('/api/materials'));
+      return await openClass();
     } catch (e) {
       if (e.status === 404) {
         store.clear();
@@ -68,7 +78,7 @@ $('#join-form').addEventListener('submit', async (ev) => {
   try {
     await join(code);
     $('#code').value = '';
-    render(await api('/api/materials'));
+    await openClass();
   } catch (e) {
     $('#join-error').textContent = e.message;
   } finally {
@@ -76,17 +86,96 @@ $('#join-form').addEventListener('submit', async (ev) => {
   }
 });
 
-$('#leave').addEventListener('click', async () => {
+async function leave() {
   store.clear();
   await api('/api/leave', { method: 'POST' }).catch(() => {});
   showJoin('');
+}
+$('#leave').addEventListener('click', leave);
+$('#who-leave').addEventListener('click', leave);
+
+// ---------- Кто ты? (вход ученика) ----------
+let roster = [];
+let picked = null;
+
+async function showWho(msg = '') {
+  const data = await api('/api/roster');
+  roster = data.students;
+  $('#who-cls').textContent = data.class.name;
+  $('#who-search').value = '';
+  $('#who-msg').textContent = msg;
+  renderWho();
+  show('who');
+}
+
+function renderWho() {
+  const q = $('#who-search').value.trim().toLocaleLowerCase('kk');
+  const items = roster.filter((x) => !q || x.name.toLocaleLowerCase('kk').includes(q));
+  $('#who-list').innerHTML = items.length
+    ? items.map((x) => `<button class="who" type="button" data-id="${x.id}">
+        <span class="who-av" aria-hidden="true">${esc(x.name.charAt(0))}</span>
+        <span class="who-name">${esc(x.name)}</span>
+        <span class="who-st">${x.registered ? '🔒' : '<span class="badge-new">Жаңа</span>'}</span></button>`).join('')
+    : '<div class="empty">Табылмады</div>';
+}
+$('#who-search').addEventListener('input', renderWho);
+$('#who-list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-id]');
+  if (b) showPin(roster.find((x) => String(x.id) === b.dataset.id));
+});
+
+function showPin(st) {
+  picked = st;
+  $('#pin-name').textContent = st.name;
+  $('#pin1').value = '';
+  $('#pin2').value = '';
+  $('#pin-error').textContent = '';
+  const first = !st.registered;
+  $('#pin-hint').textContent = first
+    ? 'Бірінші рет кіріп тұрсыз. 4 саннан тұратын PIN ойлап табыңыз. Оны ұмытпаңыз және ешкімге айтпаңыз!'
+    : 'PIN-іңізді енгізіңіз.';
+  $('#pin1-label').textContent = first ? 'Жаңа PIN' : 'PIN';
+  $('#pin2-wrap').hidden = !first;
+  $('#pin-submit').textContent = first ? 'Тіркелу ✓' : 'Кіру';
+  show('pin');
+  $('#pin1').focus();
+}
+$('#pin-back').addEventListener('click', () => showWho());
+
+// только цифры, не больше 4
+for (const id of ['#pin1', '#pin2']) {
+  $(id).addEventListener('input', (e) => (e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4)));
+}
+
+$('#pin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const pin = $('#pin1').value;
+  const err = $('#pin-error');
+  if (!/^\d{4}$/.test(pin)) return (err.textContent = 'PIN — 4 сан');
+  if (!picked.registered && pin !== $('#pin2').value) return (err.textContent = 'PIN-дер сәйкес емес');
+  const btn = $('#pin-submit');
+  btn.disabled = true;
+  try {
+    await api('/api/student/login', { method: 'POST', body: { id: picked.id, pin } });
+    await openClass();
+  } catch (e2) {
+    if (e2.status === 409) return showWho(e2.message);
+    err.textContent = e2.message;
+    $('#pin1').select();
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 function render(data) {
   state.materials = data.materials;
+  state.student = data.student;
   $('#cls-name').textContent = data.class.name;
   document.title = `${data.class.name} — Математика`;
-  $('#cls-count').textContent = `${data.materials.length} материал`;
+  const who = data.student ? `👤 ${data.student.name} · ` : '';
+  $('#cls-count').textContent = `${who}${data.materials.length} материал`;
+  $('#leave').textContent = data.student ? 'Шығу' : 'Сыныпты ауыстыру';
+  $('#preview').hidden = !data.preview;
   show('main');
   renderList();
 }
@@ -180,7 +269,7 @@ const local = {
 
 function quizBlock(m) {
   if (!m.quiz) return '';
-  const done = local.get('quiz:' + m.id);
+  const done = state.student ? m.quiz.done : local.get('quiz:' + m.id);
   if (done) {
     const again = m.quiz.retry && m.quiz.open ? `<button class="btn btn-light btn-sm" type="button" data-quiz="${m.id}">Қайта</button>` : '';
     return `<div class="quiz-done">✅ Тапсырылды: ${done.score}/${done.total}${again}</div>`;
@@ -195,7 +284,8 @@ let quizMat = null;
 function openQuiz(m) {
   quizMat = m;
   $('#quiz-title').textContent = m.title;
-  $('#quiz-name').value = local.get('studentName') || '';
+  $('#quiz-name').value = state.student ? state.student.name : local.get('studentName') || '';
+  $('#quiz-name').hidden = $('#quiz-name-label').hidden = Boolean(state.student);
   $('#quiz-inputs').innerHTML = Array.from({ length: m.quiz.count }, (_, i) =>
     `<label class="quiz-item"><span>№${i + 1}</span><input class="quiz-input" data-i="${i}" maxlength="100" inputmode="text" autocapitalize="off" spellcheck="false"></label>`,
   ).join('');
@@ -217,7 +307,7 @@ $('#quiz-form').addEventListener('submit', async (e) => {
   const name = $('#quiz-name').value.trim();
   const answers = [...document.querySelectorAll('#quiz-inputs input')].map((i) => i.value.trim());
   const err = $('#quiz-error');
-  if (name.length < 3) return (err.textContent = 'Аты-жөніңізді жазыңыз'), $('#quiz-name').focus();
+  if (name.length < 2) return (err.textContent = 'Аты-жөніңізді жазыңыз'), $('#quiz-name').focus();
   const empty = answers.filter((a) => !a).length;
   if (empty === answers.length) return (err.textContent = 'Жауаптарды жазыңыз');
   if (empty && !(await confirmBox(`${empty} есепке жауап жазылмады. Солай жібере берейін бе?`, 'Иә, жіберу'))) return;
@@ -225,11 +315,17 @@ $('#quiz-form').addEventListener('submit', async (e) => {
   btn.disabled = true;
   try {
     const r = await api(`/api/quiz/${quizMat.id}`, { method: 'POST', body: { name, answers } });
-    local.set('studentName', name);
-    local.set('quiz:' + quizMat.id, { score: r.score, total: r.total });
+    if (!state.student) {
+      local.set('studentName', name);
+      local.set('quiz:' + quizMat.id, { score: r.score, total: r.total });
+    } else quizMat.quiz.done = { score: r.score, total: r.total };
     showQuizResult(r, answers);
     renderList();
   } catch (e2) {
+    if (e2.data?.needLogin) {
+      quizDlg.close();
+      return showWho('Қайта кіріңіз: атыңызды таңдап, PIN енгізіңіз.');
+    }
     err.textContent = e2.message;
   } finally {
     btn.disabled = false;

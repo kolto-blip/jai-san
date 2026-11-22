@@ -46,12 +46,41 @@ export async function createApp() {
   const codeLimiter = new FailureLimiter(config.rateLimit.codeFailures, config.rateLimit.windowMs);
   const pinLimiter = new FailureLimiter(config.rateLimit.pinFailures, config.rateLimit.windowMs);
   // ответы учеников: не больше 120 отправок за 10 минут с одного IP (весь класс за одним школьным IP)
+  // PIN ученика: 5 ошибок на одно имя и 30 ошибок с одного IP за 15 минут
+  const studentPinLimiter = new FailureLimiter(5, config.rateLimit.windowMs);
+  const studentIpLimiter = new FailureLimiter(30, config.rateLimit.windowMs);
   const submitLimiter = new FailureLimiter(Number(process.env.SUBMIT_MAX) || 120, 10 * 60 * 1000);
 
   // ---------- вспомогательное ----------
   async function studentClass(req) {
     const code = normalizeCode(parseCookies(req).cls);
     return code ? repo.getClassByCode(code) : null;
+  }
+
+  // Кто смотрит: класс (по коду), ученик (по личному входу), учитель.
+  // Если у класса есть список учеников — без личного входа материалы закрыты.
+  async function access(req) {
+    const cls = await studentClass(req);
+    if (!cls) return { cls: null, ok: false };
+    const roster = Boolean((await repo.countStudents())[cls.id]?.total);
+    let student = null;
+    const t = auth.readStudentToken(parseCookies(req).stu);
+    if (t) {
+      const st = await repo.getStudent(t.id);
+      if (st && st.classId === cls.id && st.pinVer === t.ver && st.registered) student = st;
+    }
+    const admin = auth.isAdmin(req);
+    return { cls, roster, student, admin, ok: !roster || Boolean(student) || admin };
+  }
+
+  function cleanStudentName(raw) {
+    return String(raw || '')
+      .normalize('NFC')
+      .replace(/\t/g, ' ')
+      .replace(/^\s*№?\s*\d+\s*[.)]?\s+/, '') // «1. Әлия», «12) Нұрлан», «3<TAB>Айгерім»
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 60);
   }
 
   function requireAdmin(req) {
@@ -211,14 +240,79 @@ export async function createApp() {
   });
 
   route('POST', /^\/api\/leave$/, async (req, res) => {
-    sendJson(res, 200, { ok: true }, { 'Set-Cookie': cookie(req, 'cls', '', { maxAge: 0 }) });
+    res.setHeader('Set-Cookie', [cookie(req, 'cls', '', { maxAge: 0 }), cookie(req, 'stu', '', { maxAge: 0 })]);
+    sendJson(res, 200, { ok: true });
   });
 
   route('GET', /^\/api\/materials$/, async (req, res) => {
+    const a = await access(req);
+    if (!a.cls) return sendJson(res, 401, { error: 'Сынып кодын енгізіңіз' });
+    if (!a.ok) return sendJson(res, 401, { error: 'Атыңызды таңдап, PIN енгізіңіз', needLogin: true, class: { name: a.cls.name } });
+    const list = (await repo.listMaterialsForClass(a.cls.id)).map(publicMaterial);
+    if (a.student) {
+      // последний результат ученика по каждому заданию (оценка по текущему ключу)
+      const latest = {};
+      for (const r of await repo.listResultsForStudent(a.student.id)) latest[r.materialId] = r;
+      const byId = Object.fromEntries((await repo.listMaterialsForClass(a.cls.id)).map((m) => [m.id, m]));
+      for (const m of list) {
+        const r = latest[m.id];
+        if (m.quiz && r) {
+          const g = grade(r.answers, byId[m.id].quiz.answers);
+          m.quiz.done = { score: g.score, total: g.total };
+        }
+      }
+    }
+    sendJson(res, 200, {
+      class: { name: a.cls.name },
+      roster: a.roster,
+      student: a.student ? { name: a.student.name } : null,
+      preview: a.roster && !a.student && a.admin,
+      materials: list,
+    });
+  });
+
+  // Список учеников класса для входа (без PIN и прочего)
+  route('GET', /^\/api\/roster$/, async (req, res) => {
     const cls = await studentClass(req);
     if (!cls) return sendJson(res, 401, { error: 'Сынып кодын енгізіңіз' });
-    const list = await repo.listMaterialsForClass(cls.id);
-    sendJson(res, 200, { class: { name: cls.name }, materials: list.map(publicMaterial) });
+    const list = await repo.listStudents(cls.id);
+    sendJson(res, 200, { class: { name: cls.name }, students: list.map((x) => ({ id: x.id, name: x.name, registered: x.registered })) });
+  });
+
+  // Вход ученика: при первом входе PIN создаётся, дальше — проверяется.
+  route('POST', /^\/api\/student\/login$/, async (req, res) => {
+    const ip = clientIp(req);
+    if (studentIpLimiter.isBlocked(ip)) return tooMany(res, studentIpLimiter, ip);
+    const cls = await studentClass(req);
+    if (!cls) return sendJson(res, 401, { error: 'Сынып кодын енгізіңіз' });
+    const body = await readJson(req);
+    const st = await repo.getStudent(Number(body.id));
+    if (!st || st.classId !== cls.id) throw new HttpError(404, 'Оқушы табылмады');
+    const pin = String(body.pin ?? '');
+    if (!/^\d{4}$/.test(pin)) throw new HttpError(400, 'PIN — 4 сан');
+    let me = st;
+    if (!st.registered) {
+      me = await repo.claimStudent(st.id, auth.hashPin(pin));
+      if (!me) throw new HttpError(409, 'Бұл есімге жаңа ғана PIN қойылды. Беттi жаңартып, PIN-іңізді енгізіңіз.');
+    } else {
+      const key = 's' + st.id;
+      if (studentPinLimiter.isBlocked(key)) return tooMany(res, studentPinLimiter, key);
+      if (!auth.checkStudentPin(pin, st.pinHash)) {
+        studentPinLimiter.fail(key);
+        studentIpLimiter.fail(ip);
+        const left = 5 - studentPinLimiter.recent(key).length;
+        return sendJson(res, 401, {
+          error: left > 0 ? `PIN қате. Тағы ${left} әрекет қалды. Ұмытсаңыз — мұғалімге айтыңыз.` : 'PIN қате. Мұғалімге айтыңыз.',
+        });
+      }
+    }
+    sendJson(res, 200, { student: { name: me.name } }, {
+      'Set-Cookie': cookie(req, 'stu', auth.studentToken(me), { maxAge: STUDENT_COOKIE_AGE }),
+    });
+  });
+
+  route('POST', /^\/api\/student\/logout$/, async (req, res) => {
+    sendJson(res, 200, { ok: true }, { 'Set-Cookie': cookie(req, 'stu', '', { maxAge: 0 }) });
   });
 
   // Файл: проверка доступа при каждом скачивании.
@@ -227,8 +321,8 @@ export async function createApp() {
     let allowed = false;
     if (m && auth.isAdmin(req)) allowed = true;
     else if (m) {
-      const cls = await studentClass(req);
-      allowed = Boolean(cls && (m.allClasses || m.classIds.includes(cls.id)));
+      const a = await access(req);
+      allowed = Boolean(a.ok && (m.allClasses || m.classIds.includes(a.cls.id)));
     }
     if (!m || !m.storage || !allowed) {
       res.writeHead(m ? 403 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -276,13 +370,13 @@ export async function createApp() {
 
   route('GET', /^\/api\/admin\/overview$/, async (req, res) => {
     requireAdmin(req);
-    const [classes, materials, used, resultCounts] = await Promise.all([
-      repo.listClasses(), repo.listMaterials(), repo.usageBytes(), repo.countResults(),
+    const [classes, materials, used, resultCounts, studentCounts] = await Promise.all([
+      repo.listClasses(), repo.listMaterials(), repo.usageBytes(), repo.countResults(), repo.countStudents(),
     ]);
     const counts = {};
     for (const m of materials) for (const id of m.classIds) counts[id] = (counts[id] || 0) + 1;
     sendJson(res, 200, {
-      classes: classes.map((c) => ({ ...c, materials: counts[c.id] || 0 })),
+      classes: classes.map((c) => ({ ...c, materials: counts[c.id] || 0, students: studentCounts[c.id] || { total: 0, registered: 0 } })),
       materials: materials.map((m) => adminMaterial(m, resultCounts)),
       usage: { usedBytes: used, limitMb: storages.limitMb, storage: storages.active.name, maxFileMb: config.maxFileBytes / 1048576 },
       baseUrl: baseUrl(req),
@@ -389,26 +483,81 @@ export async function createApp() {
     sendJson(res, 200, { ok: true });
   });
 
+  // ---------- Списки учеников (учитель) ----------
+  const publicStudent = (x) => ({ id: x.id, name: x.name, registered: x.registered, registeredAt: x.registeredAt });
+
+  route('GET', /^\/api\/admin\/classes\/(\d+)\/students$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    sendJson(res, 200, (await repo.listStudents(Number(id))).map(publicStudent));
+  });
+
+  route('POST', /^\/api\/admin\/classes\/(\d+)\/students$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    const cls = await repo.getClass(Number(id));
+    if (!cls) throw new HttpError(404, 'Сынып табылмады');
+    const body = await readJson(req);
+    const lines = (Array.isArray(body.names) ? body.names : String(body.names || '').split(/\r?\n/)).map(cleanStudentName);
+    const existing = await repo.listStudents(cls.id);
+    const seen = new Set(existing.map((x) => nameKey(x.name)));
+    const add = [];
+    for (const n of lines) {
+      if (n.length < 2 || /^\d+$/.test(n) || seen.has(nameKey(n))) continue;
+      seen.add(nameKey(n));
+      add.push(n);
+    }
+    if (existing.length + add.length > 60) throw new HttpError(400, 'Бір сыныпта 60-тан көп оқушы болмайды');
+    await repo.addStudents(cls.id, add);
+    sendJson(res, 200, { added: add.length, skipped: lines.filter(Boolean).length - add.length });
+  });
+
+  route('PUT', /^\/api\/admin\/students\/(\d+)$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    const name = cleanStudentName((await readJson(req)).name);
+    if (name.length < 2) throw new HttpError(400, 'Атын жазыңыз');
+    await repo.renameStudent(Number(id), name);
+    sendJson(res, 200, { ok: true });
+  });
+
+  route('POST', /^\/api\/admin\/students\/(\d+)\/reset$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    await repo.resetStudent(Number(id));
+    sendJson(res, 200, { ok: true });
+  });
+
+  route('DELETE', /^\/api\/admin\/students\/(\d+)$/, async (req, res, [id]) => {
+    requireAdmin(req);
+    await repo.deleteStudent(Number(id));
+    sendJson(res, 200, { ok: true });
+  });
+
   // ---------- Ответы с автопроверкой ----------
   route('POST', /^\/api\/quiz\/(\d+)$/, async (req, res, [id]) => {
     const ip = clientIp(req);
     if (submitLimiter.isBlocked(ip)) return tooMany(res, submitLimiter, ip);
-    const cls = await studentClass(req);
-    if (!cls) return sendJson(res, 401, { error: 'Сынып кодын енгізіңіз' });
+    const a = await access(req);
+    if (!a.cls) return sendJson(res, 401, { error: 'Сынып кодын енгізіңіз' });
+    const cls = a.cls;
+    if (a.roster && !a.student) {
+      if (a.admin) throw new HttpError(403, 'Мұғалім ретінде қарап отырсыз — жауап жіберілмейді');
+      return sendJson(res, 401, { error: 'Атыңызды таңдап, PIN енгізіңіз', needLogin: true });
+    }
     const m = await repo.getMaterial(Number(id));
     if (!m || !(m.allClasses || m.classIds.includes(cls.id)) || !m.quiz) throw new HttpError(404, 'Тапсырма табылмады');
     if (!m.quiz.open) throw new HttpError(403, 'Жауап қабылдау жабылды');
     const body = await readJson(req);
-    const name = String(body.name || '').normalize('NFC').trim().replace(/\s+/g, ' ').slice(0, 60);
-    if (name.length < 3) throw new HttpError(400, 'Аты-жөніңізді толық жазыңыз');
+    const name = a.student ? a.student.name : String(body.name || '').normalize('NFC').trim().replace(/\s+/g, ' ').slice(0, 60);
+    if (name.length < 2) throw new HttpError(400, 'Аты-жөніңізді толық жазыңыз');
     const answers = m.quiz.answers.map((_, i) => String(body.answers?.[i] ?? '').trim().slice(0, 100));
-    if (answers.every((a) => !a)) throw new HttpError(400, 'Кем дегенде бір жауап жазыңыз');
+    if (answers.every((x) => !x)) throw new HttpError(400, 'Кем дегенде бір жауап жазыңыз');
     const key = nameKey(name);
-    if (!m.quiz.retry && (await repo.hasResult(m.id, cls.id, key))) {
-      throw new HttpError(409, 'Бұл есіммен жауап тапсырылған. Қайта тапсыруға мұғалім рұқсат бермеген.');
+    const already = a.student ? await repo.hasResultByStudent(m.id, a.student.id) : await repo.hasResult(m.id, cls.id, key);
+    if (!m.quiz.retry && already) {
+      throw new HttpError(409, a.student
+        ? 'Сіз бұл тапсырманы тапсырып қойдыңыз. Қайта тапсыруға мұғалім рұқсат бермеген.'
+        : 'Бұл есіммен жауап тапсырылған. Қайта тапсыруға мұғалім рұқсат бермеген.');
     }
     submitLimiter.fail(ip); // считаем каждую отправку
-    await repo.createResult({ materialId: m.id, classId: cls.id, name, nameKey: key, answers });
+    await repo.createResult({ materialId: m.id, classId: cls.id, name, nameKey: key, answers, studentId: a.student?.id ?? null });
     const g = grade(answers, m.quiz.answers);
     sendJson(res, 200, { ...g, correct: m.quiz.show ? m.quiz.answers : undefined });
   });
@@ -417,16 +566,31 @@ export async function createApp() {
     const m = await repo.getMaterial(materialId);
     if (!m) throw new HttpError(404, 'Материал табылмады');
     const key = m.quiz?.answers || [];
-    const names = Object.fromEntries((await repo.listClasses()).map((c) => [c.id, c.name]));
+    const classes = await repo.listClasses();
+    const names = Object.fromEntries(classes.map((c) => [c.id, c.name]));
+    // списки учеников классов, которым адресовано задание
+    const students = {};
+    for (const c of classes) {
+      if (!m.allClasses && !m.classIds.includes(c.id)) continue;
+      for (const st of await repo.listStudents(c.id)) students[st.id] = st;
+    }
     // ключ мог измениться — оцениваем заново при каждом просмотре
     const results = (await repo.listResults(m.id)).map((r) => ({
-      id: r.id, name: r.name, className: names[r.classId] || '—', classId: r.classId,
-      answers: r.answers, createdAt: r.createdAt, ...grade(r.answers, key),
+      id: r.id, name: students[r.studentId]?.name || r.name, className: names[r.classId] || '—', classId: r.classId,
+      studentId: r.studentId, answers: r.answers, createdAt: r.createdAt, ...grade(r.answers, key),
     }));
     // номер попытки для одного и того же ученика
     const seen = {};
-    for (const r of results) r.attempt = seen[r.classId + '|' + nameKey(r.name)] = (seen[r.classId + '|' + nameKey(r.name)] || 0) + 1;
-    return { material: { id: m.id, title: m.title }, key, results };
+    for (const r of results) {
+      const k = r.studentId ? 's' + r.studentId : r.classId + '|' + nameKey(r.name);
+      r.attempt = seen[k] = (seen[k] || 0) + 1;
+    }
+    // кто из списка класса ещё не сдал
+    const done = new Set(results.map((r) => r.studentId).filter(Boolean));
+    const missing = Object.values(students)
+      .filter((st) => !done.has(st.id))
+      .map((st) => ({ name: st.name, classId: st.classId, className: names[st.classId] || '—', studentId: st.id, registered: st.registered }));
+    return { material: { id: m.id, title: m.title }, key, results, missing };
   }
 
   route('GET', /^\/api\/admin\/materials\/(\d+)\/results$/, async (req, res, [id]) => {
@@ -447,6 +611,7 @@ export async function createApp() {
       r.className, r.name, r.score, r.total, r.attempt, new Date(r.createdAt).toLocaleString('ru-RU', { timeZone: config.timeZone }),
       ...r.answers.map((a, i) => `${r.marks[i] ? '✓' : '✗'} ${a}`),
     ]);
+    for (const x of t.missing) rows.push([x.className, x.name, '', t.key.length, 0, 'тапсырмаған']);
     const csv = '\ufeff' + [head, ...rows].map((row) => row.map(cell).join(';')).join('\r\n');
     res.writeHead(200, {
       'Content-Type': 'text/csv; charset=utf-8',

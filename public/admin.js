@@ -84,11 +84,12 @@ function renderClasses() {
       <div class="ccard-head">
         <div class="cls-badge">${esc(c.name)}</div>
         <div><div class="hint">Сынып коды</div><div class="ccard-code">${esc(c.code)}</div>
-        <p class="hint">${c.materials} жеке материал</p></div>
+        <p class="hint">${c.materials} жеке материал · ${c.students.total ? `${c.students.registered}/${c.students.total} оқушы тіркелді` : 'тізімсіз'}</p></div>
       </div>
       <div class="link">${esc(S.baseUrl)}/k/${esc(c.code)}</div>
       <div class="btns">
         <a class="btn btn-yellow btn-sm" href="/print/${c.id}" target="_blank">🖨 QR карточка</a>
+        <button class="btn btn-green btn-sm" data-act="students">👥 Оқушылар (${c.students.total})</button>
         <button class="btn btn-blue btn-sm" data-act="view">👁 Көру</button>
         <button class="btn btn-purple btn-sm" data-act="regen">🎲 Жаңа код</button>
         <button class="btn btn-purple btn-sm" data-act="manual">✏️ Өз кодым</button>
@@ -146,6 +147,7 @@ $('#class-list').addEventListener('click', async (e) => {
   const id = Number(b.closest('[data-id]').dataset.id);
   const c = S.classes.find((x) => x.id === id);
   try {
+    if (b.dataset.act === 'students') return openStudents(c);
     if (b.dataset.act === 'view') {
       await api('/api/join', { method: 'POST', body: { code: c.code } });
       window.open('/', '_blank');
@@ -435,9 +437,10 @@ async function openResults(m) {
   } catch (e) {
     return toast(e.message, true);
   }
-  const classIds = [...new Set(R.data.results.map((r) => r.classId))];
+  const all = [...R.data.results, ...R.data.missing];
+  const classIds = [...new Set(all.map((r) => r.classId))];
   $('#res-class').innerHTML = '<option value="">Барлық сыныптар</option>' +
-    classIds.map((id) => `<option value="${id}">${esc(R.data.results.find((r) => r.classId === id).className)}</option>`).join('');
+    classIds.map((id) => `<option value="${id}">${esc(all.find((r) => r.classId === id).className)}</option>`).join('');
   renderResults();
   if (!resDlg.open) resDlg.showModal();
 }
@@ -453,17 +456,18 @@ function renderResults() {
   }
   rows.sort((a, b) => a.className.localeCompare(b.className, 'kk') || a.name.localeCompare(b.name, 'kk') || a.attempt - b.attempt);
 
-  if (!rows.length) {
+  if (!rows.length && !R.data.missing.some((x) => !cf || x.classId === cf)) {
     $('#res-summary').innerHTML = '';
     $('#res-table').innerHTML = '<div class="empty res-empty"><div class="big-emoji">📭</div>Әзірге жауап жоқ</div>';
     return;
   }
-  const avg = rows.reduce((s, r) => s + r.score / r.total, 0) / rows.length;
+  const avg = rows.length ? rows.reduce((s, r) => s + r.score / r.total, 0) / rows.length : 0;
   const full = rows.filter((r) => r.score === r.total).length;
-  $('#res-summary').innerHTML = `<span class="tag">Жауап берді: ${rows.length}</span>
+  const miss = R.data.missing.filter((x) => !cf || x.classId === cf).length;
+  $('#res-summary').innerHTML = `<span class="tag">Жауап берді: ${rows.length}</span>${miss ? `<span class="tag tag-none">Тапсырмағандар: ${miss}</span>` : ''}
     <span class="tag">Орташа: ${Math.round(avg * 100)}%</span><span class="tag tag-quiz">Бәрі дұрыс: ${full}</span>`;
 
-  const pct = key.map((_, i) => Math.round((rows.filter((r) => r.marks[i]).length / rows.length) * 100));
+  const pct = key.map((_, i) => (rows.length ? Math.round((rows.filter((r) => r.marks[i]).length / rows.length) * 100) : 0));
   const fmtTime = (t) => new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
   $('#res-table').innerHTML = `<table>
     <thead><tr><th class="l">Сынып</th><th class="l">Аты-жөні</th><th>Ұпай</th>${key.map((k, i) => `<th title="Жауабы: ${esc(k)}">№${i + 1}</th>`).join('')}<th>Уақыт</th><th></th></tr></thead>
@@ -474,8 +478,17 @@ function renderResults() {
       ${r.marks.map((ok, i) => `<td><span class="mk ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'}</span><small title="${esc(r.answers[i])}">${esc(r.answers[i] || '—')}</small></td>`).join('')}
       <td>${fmtTime(r.createdAt)}</td>
       <td><button class="del-res" data-res="${r.id}" title="Жою">🗑</button></td></tr>`).join('')}</tbody>
+    ${missingRows(cf)}
     <tfoot><tr><td class="l" colspan="3">Дұрыс шығарғандар</td>${pct.map((p) => `<td class="${p < 50 ? 'pct-low' : ''}">${p}%</td>`).join('')}<td colspan="2"></td></tr></tfoot>
   </table>`;
+}
+
+function missingRows(cf) {
+  const list = R.data.missing.filter((x) => !cf || x.classId === cf)
+    .sort((a, b) => a.className.localeCompare(b.className, 'kk') || a.name.localeCompare(b.name, 'kk'));
+  if (!list.length) return '';
+  return `<tbody>${list.map((x) => `<tr class="missing"><td class="l">${esc(x.className)}</td><td class="l">${esc(x.name)}</td>
+    <td>—</td><td colspan="${R.data.key.length}">тапсырмаған${x.registered ? '' : ' · сайтқа кірмеген'}</td><td></td><td></td></tr>`).join('')}</tbody>`;
 }
 
 $('#res-class').addEventListener('change', renderResults);
@@ -493,6 +506,73 @@ $('#res-clear').addEventListener('click', async () => {
   if (!(await confirmBox(`«${R.mat.title}» бойынша барлық жауаптар жойылады.`))) return;
   await api(`/api/admin/materials/${R.mat.id}/results`, { method: 'DELETE' }).catch((err) => toast(err.message, true));
   openResults(R.mat);
+});
+
+// ---------- Оқушылар ----------
+const stuDlg = $('#stu-dlg');
+let stuClass = null;
+
+async function openStudents(c) {
+  stuClass = c;
+  $('#stu-title').textContent = `👥 ${c.name} — оқушылар`;
+  let list;
+  try {
+    list = await api(`/api/admin/classes/${c.id}/students`);
+  } catch (e) {
+    return toast(e.message, true);
+  }
+  const reg = list.filter((x) => x.registered).length;
+  $('#stu-summary').innerHTML = list.length
+    ? `<span class="tag">Барлығы: ${list.length}</span><span class="tag tag-quiz">Тіркелді: ${reg}</span>${list.length - reg ? `<span class="tag tag-none">Әлі кірмеген: ${list.length - reg}</span>` : ''}`
+    : '<span class="tag tag-none">Тізім бос — оқушылар есімсіз кіреді (тек сынып коды)</span>';
+  $('#stu-list').innerHTML = list.map((x) => `<div class="srow" data-sid="${x.id}">
+      <span class="nm">${esc(x.name)}</span>
+      <span class="st ${x.registered ? 'ok' : ''}">${x.registered ? '✅ тіркелді' : '⏳ әлі кірмеген'}</span>
+      ${x.registered ? '<button class="btn btn-yellow btn-sm" data-sact="reset">🔑 PIN тастау</button>' : ''}
+      <button class="btn btn-light btn-sm" data-sact="rename">✏️</button>
+      <button class="btn btn-coral btn-sm" data-sact="del">🗑</button></div>`).join('');
+  $('#stu-add').open = !list.length;
+  if (!stuDlg.open) stuDlg.showModal();
+}
+
+$('#stu-close').addEventListener('click', () => stuDlg.close());
+stuDlg.addEventListener('close', () => refresh().catch(() => {}));
+
+$('#stu-save').addEventListener('click', async () => {
+  const names = $('#stu-names').value;
+  if (!names.trim()) return toast('Есімдерді жазыңыз', true);
+  try {
+    const r = await api(`/api/admin/classes/${stuClass.id}/students`, { method: 'POST', body: { names } });
+    $('#stu-names').value = '';
+    toast(`Қосылды: ${r.added}${r.skipped ? ` · қайталанғаны өткізілді: ${r.skipped}` : ''}`);
+    openStudents(stuClass);
+  } catch (e) {
+    toast(e.message, true);
+  }
+});
+
+$('#stu-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-sact]');
+  if (!b) return;
+  const id = b.closest('[data-sid]').dataset.sid;
+  const name = b.closest('[data-sid]').querySelector('.nm').textContent;
+  try {
+    if (b.dataset.sact === 'reset') {
+      if (!(await confirmBox(`${name}: PIN өшіріледі. Оқушы келесі кіргенде жаңа PIN ойлап табады.`, 'Иә, тастау'))) return;
+      await api(`/api/admin/students/${id}/reset`, { method: 'POST' });
+      toast('PIN тасталды');
+    } else if (b.dataset.sact === 'rename') {
+      const nn = await askText({ title: 'Оқушы аты', text: '', value: name, max: 60, upper: false });
+      if (!nn) return;
+      await api(`/api/admin/students/${id}`, { method: 'PUT', body: { name: nn } });
+    } else {
+      if (!(await confirmBox(`${name} тізімнен жойылады. Бұрынғы жауаптары нәтижелерде қалады.`))) return;
+      await api(`/api/admin/students/${id}`, { method: 'DELETE' });
+    }
+    openStudents(stuClass);
+  } catch (err) {
+    toast(err.message, true);
+  }
 });
 
 resetForm();

@@ -5,7 +5,7 @@ import path from 'node:path';
 export async function createJsonRepo(dataDir) {
   await fs.mkdir(dataDir, { recursive: true });
   const file = path.join(dataDir, 'db.json');
-  let state = { seq: { classes: 0, materials: 0, results: 0 }, classes: [], materials: [], results: [], settings: {} };
+  let state = { seq: { classes: 0, materials: 0, results: 0, students: 0 }, classes: [], materials: [], results: [], students: [], settings: {} };
   try {
     const loaded = JSON.parse(await fs.readFile(file, 'utf8'));
     state = { ...state, ...loaded, seq: { ...state.seq, ...loaded.seq } };
@@ -38,7 +38,7 @@ export async function createJsonRepo(dataDir) {
     },
 
     async listClasses() {
-      return clone([...state.classes].sort((a, b) => a.name.localeCompare(b.name, 'kk') || a.id - b.id));
+      return clone([...state.classes].sort((a, b) => a.name.localeCompare(b.name, 'kk', { numeric: true }) || a.id - b.id));
     },
     async getClass(id) {
       return clone(state.classes.find((c) => c.id === id));
@@ -66,6 +66,9 @@ export async function createJsonRepo(dataDir) {
     },
     async deleteClass(id) {
       state.classes = state.classes.filter((c) => c.id !== id);
+      const gone = new Set(state.students.filter((x) => x.classId === id).map((x) => x.id));
+      state.students = state.students.filter((x) => x.classId !== id);
+      for (const r of state.results) if (gone.has(r.studentId)) r.studentId = null;
       for (const m of state.materials) m.classIds = m.classIds.filter((x) => x !== id);
       await save();
     },
@@ -116,7 +119,7 @@ export async function createJsonRepo(dataDir) {
       return state.results.some((r) => r.materialId === materialId && r.classId === classId && r.nameKey === nameKey);
     },
     async createResult(r) {
-      const rec = { id: ++state.seq.results, ...r, createdAt: new Date().toISOString() };
+      const rec = { id: ++state.seq.results, ...r, studentId: r.studentId ?? null, createdAt: new Date().toISOString() };
       state.results.push(rec);
       await save();
       return clone(rec);
@@ -127,6 +130,61 @@ export async function createJsonRepo(dataDir) {
     },
     async deleteResults(materialId) {
       state.results = state.results.filter((r) => r.materialId !== materialId);
+      await save();
+    },
+    async hasResultByStudent(materialId, studentId) {
+      return state.results.some((r) => r.materialId === materialId && r.studentId === studentId);
+    },
+    async listResultsForStudent(studentId) {
+      return clone(state.results.filter((r) => r.studentId === studentId));
+    },
+
+    // ---------- ученики ----------
+    async listStudents(classId) {
+      return clone(state.students.filter((x) => x.classId === classId)
+        .sort((a, b) => a.name.localeCompare(b.name, 'kk', { numeric: true }) || a.id - b.id))
+        .map((x) => ({ ...x, registered: Boolean(x.pinHash) }));
+    },
+    async countStudents() {
+      const out = {};
+      for (const x of state.students) {
+        const c = (out[x.classId] ||= { total: 0, registered: 0 });
+        c.total++;
+        if (x.pinHash) c.registered++;
+      }
+      return out;
+    },
+    async getStudent(id) {
+      const x = state.students.find((s) => s.id === id);
+      return x ? { ...clone(x), registered: Boolean(x.pinHash) } : null;
+    },
+    async addStudents(classId, names) {
+      for (const name of names) {
+        state.students.push({ id: ++state.seq.students, classId, name, pinHash: null, pinVer: 0, registeredAt: null, createdAt: new Date().toISOString() });
+      }
+      await save();
+    },
+    async renameStudent(id, name) {
+      const x = state.students.find((s) => s.id === id);
+      if (x) x.name = name;
+      await save();
+    },
+    async claimStudent(id, pinHash) {
+      const x = state.students.find((s) => s.id === id);
+      if (!x || x.pinHash) return null;
+      x.pinHash = pinHash;
+      x.registeredAt = new Date().toISOString();
+      await save();
+      return { ...clone(x), registered: true };
+    },
+    async resetStudent(id) {
+      const x = state.students.find((s) => s.id === id);
+      if (x) Object.assign(x, { pinHash: null, registeredAt: null, pinVer: x.pinVer + 1 });
+      await save();
+    },
+    async deleteStudent(id) {
+      state.students = state.students.filter((s) => s.id !== id);
+      for (const r of state.results) if (r.studentId === id) r.studentId = null;
       await save();
     },
     async usageBytes() {

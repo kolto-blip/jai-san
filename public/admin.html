@@ -168,6 +168,26 @@
     </form>
   </dialog>
 
+  <dialog id="stu-dlg">
+    <div class="modal stu">
+      <div class="modal-head">
+        <h2 id="stu-title">Оқушылар</h2>
+        <button class="btn btn-coral btn-sm" id="stu-close" type="button">Жабу ✕</button>
+      </div>
+      <p class="hint">Тізім болса, оқушылар сынып кодынан кейін өз атын таңдап, 4 санды PIN ойлап табады.
+        Әр есімді тек бір оқушы ала алады. PIN ұмытылса — «PIN тастау».</p>
+      <div class="stu-summary" id="stu-summary"></div>
+      <div class="stu-list" id="stu-list"></div>
+      <details class="stu-add" id="stu-add">
+        <summary>➕ Оқушыларды қосу</summary>
+        <label for="stu-names">Әр жолға бір оқушы (Kundelik немесе Excel-ден көшіріп қоюға болады)</label>
+        <textarea id="stu-names" rows="8" placeholder="Әлия Серікқызы&#10;Нұрлан Бекұлы&#10;Айгерім Төлеген"></textarea>
+        <p class="hint">Тек атын немесе «Әлия С.» деп қысқа жазуға болады — тізімді бүкіл сынып көреді.</p>
+        <button class="btn btn-green" type="button" id="stu-save">Қосу</button>
+      </details>
+    </div>
+  </dialog>
+
   <dialog id="res-dlg">
     <div class="modal res">
       <div class="modal-head">

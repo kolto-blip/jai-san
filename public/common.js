@@ -38,7 +38,7 @@ async function api(path, { method = 'GET', body, headers = {} } = {}) {
     throw Object.assign(new Error('Интернет байланысы жоқ'), { status: 0 });
   }
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.error || 'Қате'), { status: res.status });
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Қате'), { status: res.status, data });
   return data;
 }
 
@@ -49,8 +49,10 @@ function toast(text, isError = false) {
     el = document.createElement('div');
     el.className = 'toast';
     el.setAttribute('role', 'status');
-    document.body.appendChild(el);
   }
+  // поверх открытого окна (dialog в «верхнем слое» перекрывает всё остальное)
+  const host = [...document.querySelectorAll('dialog[open]')].pop() || document.body;
+  if (el.parentNode !== host) host.appendChild(el);
   el.textContent = text;
   el.classList.toggle('err', isError);
   el.hidden = false;

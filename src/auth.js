@@ -24,7 +24,36 @@ export async function createAuth(repo) {
   const key = crypto.createHmac('sha256', secret).update('admin:' + config.adminPin).digest();
   const sign = (s) => crypto.createHmac('sha256', key).update(s).digest('base64url');
 
+  const studentKey = crypto.createHmac('sha256', secret).update('student').digest();
+  const signStudent = (s) => crypto.createHmac('sha256', studentKey).update(s).digest('base64url');
+
   return {
+    // ---------- ученики ----------
+    studentToken(student) {
+      const body = `${student.id}.${student.pinVer}`;
+      return `${body}.${signStudent(body)}`;
+    },
+    // → { id, ver } или null; версия PIN проверяется по базе (сброс PIN завершает сессии)
+    readStudentToken(token) {
+      const [id, ver, sig] = String(token || '').split('.');
+      if (!id || !ver || !sig) return null;
+      const good = Buffer.from(signStudent(`${id}.${ver}`));
+      const got = Buffer.from(sig);
+      if (good.length !== got.length || !crypto.timingSafeEqual(good, got)) return null;
+      return { id: Number(id), ver: Number(ver) };
+    },
+    hashPin(pin) {
+      const salt = crypto.randomBytes(16).toString('hex');
+      return `${salt}:${crypto.scryptSync(String(pin), salt, 32).toString('hex')}`;
+    },
+    checkStudentPin(pin, stored) {
+      const [salt, hash] = String(stored || '').split(':');
+      if (!salt || !hash) return false;
+      const a = crypto.scryptSync(String(pin), salt, 32);
+      const b = Buffer.from(hash, 'hex');
+      return a.length === b.length && crypto.timingSafeEqual(a, b);
+    },
+
     issueToken() {
       const exp = String(Date.now() + SESSION_DAYS * 86400_000);
       return { token: `${exp}.${sign(exp)}`, maxAge: SESSION_DAYS * 86400 };

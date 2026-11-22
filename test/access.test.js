@@ -273,6 +273,87 @@ function suite(label, makeEnv) {
       assert.equal((await a.req(`/api/admin/materials/${id}/results`, { method: 'DELETE' })).status, 200);
     });
 
+    test('вход учеников по списку класса и PIN', async () => {
+      const a = admin();
+      await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      const ov = await (await a.req('/api/admin/overview')).json();
+      const c8 = ov.classes.find((c) => c.name === '8Ғ');
+      const add = await (await a.req(`/api/admin/classes/${c8.id}/students`, {
+        method: 'POST', json: { names: '1. Әлия Серікқызы\n2) Нұрлан Б.\n\nәлия  серікқызы\n3\tАйгерім Т.' },
+      })).json();
+      assert.deepEqual(add, { added: 3, skipped: 1 });
+
+      // ученик с кодом класса, но без личного входа — ничего не видит и не скачивает
+      const s = client(srv.base);
+      await s.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      const m401 = await s.req('/api/materials');
+      assert.equal(m401.status, 401);
+      assert.equal((await m401.json()).needLogin, true);
+      assert.equal((await s.req(`/f/${mats[PDF_8G].id}`)).status, 403);
+      const roster = (await (await s.req('/api/roster')).json()).students;
+      assert.deepEqual(roster.map((x) => x.name), ['Айгерім Т.', 'Әлия Серікқызы', 'Нұрлан Б.'].sort((x, y) => x.localeCompare(y, 'kk')));
+      assert.ok(!JSON.stringify(roster).includes('pin'), 'хеши PIN не отдаются');
+      const alia = roster.find((x) => x.name === 'Әлия Серікқызы');
+      const nurlan = roster.find((x) => x.name === 'Нұрлан Б.');
+
+      // первый вход — PIN создаётся
+      assert.equal((await s.req('/api/student/login', { method: 'POST', json: { id: alia.id, pin: '12a4' } })).status, 400);
+      assert.equal((await s.req('/api/student/login', { method: 'POST', json: { id: alia.id, pin: '1234' } })).status, 200);
+      const me = await (await s.req('/api/materials')).json();
+      assert.equal(me.student.name, 'Әлия Серікқызы');
+      assert.equal((await s.req(`/f/${mats[PDF_8G].id}`)).status, 200);
+
+      // на чужом телефоне занять имя Әлии нельзя; подбор PIN блокируется
+      const thief = client(srv.base);
+      await thief.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      for (let i = 0; i < 5; i++) {
+        assert.equal((await thief.req('/api/student/login', { method: 'POST', json: { id: alia.id, pin: String(5000 + i) } })).status, 401);
+      }
+      assert.equal((await thief.req('/api/student/login', { method: 'POST', json: { id: alia.id, pin: '1234' } })).status, 429);
+      // ученик из другого класса не может войти под именем из 8Ғ
+      const other = client(srv.base);
+      await other.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
+      assert.equal((await other.req('/api/student/login', { method: 'POST', json: { id: nurlan.id, pin: '1111' } })).status, 404);
+
+      // ответы записываются на ученика, имя вписывать не нужно
+      const n = client(srv.base);
+      await n.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      await n.req('/api/student/login', { method: 'POST', json: { id: nurlan.id, pin: '5555' } });
+      const quizMat = await (await a.req('/api/admin/materials', {
+        method: 'POST',
+        json: { title: 'Өзіндік жұмыс', topic: 'Дәреже', type: 'link', url: 'https://example.com/', classIds: [c8.id], quiz: { answers: ['8', '1/2'] } },
+      })).json();
+      const r = await (await n.req(`/api/quiz/${quizMat.id}`, { method: 'POST', json: { name: 'Басқа есім', answers: ['8', '0,5'] } })).json();
+      assert.equal(r.score, 2);
+      assert.equal((await n.req(`/api/quiz/${quizMat.id}`, { method: 'POST', json: { answers: ['8', '1'] } })).status, 409);
+      const mats8 = await (await n.req('/api/materials')).json();
+      assert.deepEqual(mats8.materials.find((m) => m.id === quizMat.id).quiz.done, { score: 2, total: 2 });
+      const t = await (await a.req(`/api/admin/materials/${quizMat.id}/results`)).json();
+      assert.equal(t.results[0].name, 'Нұрлан Б.');
+      assert.deepEqual(t.missing.map((x) => x.name).sort(), ['Айгерім Т.', 'Әлия Серікқызы'].sort());
+
+      // учитель видит класс без личного входа, но ответить за ученика не может
+      const view = client(srv.base, { 'x-req': '1' });
+      await view.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      await view.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      assert.equal((await (await view.req('/api/materials')).json()).preview, true);
+      assert.equal((await view.req(`/api/quiz/${quizMat.id}`, { method: 'POST', json: { answers: ['8'] } })).status, 403);
+
+      // сброс PIN завершает сессию; имя снова свободно для первого входа
+      const st = await (await a.req(`/api/admin/classes/${c8.id}/students`)).json();
+      assert.equal(st.find((x) => x.id === alia.id).registered, true);
+      assert.equal((await a.req(`/api/admin/students/${alia.id}/reset`, { method: 'POST' })).status, 200);
+      assert.equal((await s.req('/api/materials')).status, 401);
+      assert.equal((await s.req('/api/student/login', { method: 'POST', json: { id: alia.id, pin: '4321' } })).status, 200);
+      assert.equal((await s.req('/api/materials')).status, 200);
+
+      // список удаляется — класс снова открыт по одному коду
+      for (const x of st) await a.req(`/api/admin/students/${x.id}`, { method: 'DELETE' });
+      const plain = client(srv.base);
+      await plain.req('/api/join', { method: 'POST', json: { code: codes['8Ғ'] } });
+      assert.equal((await plain.req('/api/materials')).status, 200);
+    });
+
     test('подбор кода класса блокируется по IP', async () => {
       const s = client(srv.base);
       let last;
@@ -301,7 +382,7 @@ if (process.env.TEST_DATABASE_URL) {
     const c = new pg.Client(process.env.TEST_DATABASE_URL);
     await c.connect();
     try {
-      await c.query('DROP TABLE IF EXISTS results, classes, materials, files, settings CASCADE');
+      await c.query('DROP TABLE IF EXISTS results, students, classes, materials, files, settings CASCADE');
     } finally {
       await c.end();
     }

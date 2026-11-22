@@ -25,6 +25,36 @@
       </form>
     </section>
 
+    <!-- Кто ты? -->
+    <section id="who" hidden>
+      <header class="top">
+        <div class="cls-badge" id="who-cls">7А</div>
+        <div class="grow"><h1>Атыңызды таңдаңыз</h1><div class="muted">Бір рет кірсеңіз, телефон есте сақтайды</div></div>
+        <button class="btn btn-ghost btn-sm" id="who-leave" type="button">Сыныпты ауыстыру</button>
+      </header>
+      <div class="form-error who-msg" id="who-msg" role="alert"></div>
+      <input id="who-search" class="search" type="search" placeholder="Атыңызды іздеу" aria-label="Атыңызды іздеу">
+      <div id="who-list" class="who-list"></div>
+      <p class="who-help">Атыңыз тізімде жоқ па? Мұғаліміңізге айтыңыз.</p>
+    </section>
+
+    <!-- PIN -->
+    <section id="pin" class="join" hidden>
+      <form id="pin-form" class="card" autocomplete="off">
+        <button type="button" class="btn btn-light btn-sm" id="pin-back">← Артқа</button>
+        <h2 class="pin-name" id="pin-name"></h2>
+        <p class="hint" id="pin-hint"></p>
+        <label for="pin1" id="pin1-label">PIN</label>
+        <input id="pin1" class="code-input" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+        <div id="pin2-wrap">
+          <label for="pin2" class="pin2-label">PIN-ді қайталаңыз</label>
+          <input id="pin2" class="code-input" type="password" inputmode="numeric" maxlength="4" autocomplete="off">
+        </div>
+        <div id="pin-error" class="form-error" role="alert"></div>
+        <button class="btn btn-green btn-block" type="submit" id="pin-submit">Кіру</button>
+      </form>
+    </section>
+
     <!-- Материалы класса -->
     <section id="main" hidden>
       <header class="top">
@@ -35,6 +65,8 @@
         </div>
         <button class="btn btn-ghost btn-sm" id="leave" type="button">Сыныпты ауыстыру</button>
       </header>
+
+      <div class="preview-note" id="preview" hidden>👁 Мұғалім ретінде қарап отырсыз — оқушылар өз аты мен PIN арқылы кіреді.</div>
 
       <div class="filters" role="group" aria-label="Материал түрі">
         <button class="chip" data-kind="all" aria-pressed="true">Барлығы</button>
@@ -69,7 +101,7 @@
         <button class="btn btn-coral btn-sm" id="quiz-close" type="button">Жабу ✕</button>
       </div>
       <div id="quiz-body">
-        <label class="quiz-label" for="quiz-name">Аты-жөніңіз</label>
+        <label class="quiz-label" for="quiz-name" id="quiz-name-label">Аты-жөніңіз</label>
         <input id="quiz-name" class="quiz-input quiz-name" maxlength="60" autocomplete="name" placeholder="Мысалы: Әлия Серікқызы">
         <div class="quiz-grid" id="quiz-inputs"></div>
         <p class="hint">Бөлшекті <b>3/4</b> немесе <b>0,75</b> деп жазуға болады. Бірнеше түбір болса — нүктелі үтірмен: <b>2; -3</b></p>
