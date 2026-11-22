@@ -62,6 +62,8 @@ const COLS = {
 };
 
 export async function createPgRepo(connectionString) {
+  // Neon даёт sslmode=require; pg и так проверяет сертификат полностью — пишем это явно, без предупреждения в логах.
+  connectionString = connectionString.replace(/([?&]sslmode=)(require|prefer|verify-ca)\b/, '$1verify-full');
   const pool = new pg.Pool({
     connectionString,
     max: 5,
