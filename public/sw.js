@@ -1,8 +1,9 @@
 // Сервис-воркер: приложение открывается быстро и без интернета показывает понятный экран.
 // Материалы, файлы, фото и ответы НЕ кешируются — они всегда идут через сервер с проверкой доступа.
-const CACHE = 'matematika-v1';
+const CACHE = 'matematika-v2';
+const FILES = 'offline-files'; // файлы, которые ученик сам сохранил в телефон
 const SHELL = [
-  '/offline.html', '/style.css', '/common.js', '/app.js', '/favicon.svg', '/manifest.webmanifest',
+  '/', '/offline.html', '/style.css', '/common.js', '/app.js', '/favicon.svg', '/manifest.webmanifest',
   '/icons/icon-192.png', '/icons/apple-touch-icon.png',
   '/fonts/nunito-latin-wght-normal.woff2', '/fonts/nunito-cyrillic-wght-normal.woff2', '/fonts/nunito-cyrillic-ext-wght-normal.woff2',
 ];
@@ -15,7 +16,7 @@ self.addEventListener('install', (e) => {
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== FILES).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -23,11 +24,31 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   const url = new URL(req.url);
-  if (req.method !== 'GET' || url.origin !== location.origin || PRIVATE.test(url.pathname)) return;
+  if (req.method !== 'GET' || url.origin !== location.origin) return;
 
-  // страницы: всегда свежие с сервера, без интернета — экран «нет связи»
+  // файл материала: при сети — сервер (с проверкой доступа); без сети — сохранённая копия
+  if (/^\/f\/\d+$/.test(url.pathname)) {
+    e.respondWith(
+      fetch(req).catch(async () => (await (await caches.open(FILES)).match(url.pathname)) || caches.match('/offline.html')),
+    );
+    return;
+  }
+  if (PRIVATE.test(url.pathname)) return;
+
+  // страницы: всегда свежие с сервера; без интернета главная открывается из кеша
+  // (покажет сохранённые материалы), остальные — экран «нет связи»
   if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).catch(() => caches.match('/offline.html')));
+    e.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (url.pathname === '/' && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put('/', copy));
+          }
+          return res;
+        })
+        .catch(async () => (url.pathname === '/' && (await caches.match('/'))) || caches.match('/offline.html')),
+    );
     return;
   }
   // шрифты и иконки не меняются — из кеша

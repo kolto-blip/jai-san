@@ -336,3 +336,14 @@ dialog::backdrop { background: rgb(20 10 50 / .8); }
 .ios-help ol { padding-left: 22px; display: grid; gap: 8px; margin: 10px 0; }
 .ios-share { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; background: var(--soft); color: var(--blue-d); font-weight: 900; }
 @media (display-mode: standalone) { body { padding-top: env(safe-area-inset-top); } }
+
+/* ===== Без интернета ===== */
+.offline-note { background: var(--yellow); color: #4a3500; font-weight: 800; border-radius: 14px; padding: 10px 14px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.offline-note .btn { margin-left: auto; }
+.offline-bar { background: rgb(255 255 255 / .12); color: #fff; border-radius: 14px; padding: 8px 12px; margin-bottom: 14px;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 15px; }
+.offline-bar span { flex: 1; min-width: 180px; }
+.mat .actions .btn.btn-icon.saved { --c: #e9fbf1; --cd: #b8ecd0; }
+.need-net { flex: 1; display: flex; align-items: center; justify-content: center; min-height: var(--tap); border-radius: 16px;
+  background: var(--soft); color: var(--muted); font-weight: 800; }
+.saved-tag { display: flex; align-items: center; padding: 0 12px; border-radius: 14px; background: #e9fbf1; color: var(--green-d); font-weight: 800; }

@@ -45,6 +45,7 @@ async function load() {
   try {
     return await openClass();
   } catch (e) {
+    if (e.status === 0 && (await showOffline())) return; // нет интернета — сохранённые материалы
     if (e.status !== 401) return showJoin(e.message);
   }
   const saved = store.get();
@@ -55,6 +56,7 @@ async function load() {
     } catch (e) {
       if (e.status === 404) {
         store.clear();
+        await offline.clear();
         return showJoin('Сынып коды өзгерген. Жаңа кодты мұғаліміңізден сұраңыз.');
       }
       return showJoin(e.message);
@@ -88,6 +90,7 @@ $('#join-form').addEventListener('submit', async (ev) => {
 
 async function leave() {
   store.clear();
+  await offline.clear(); // общий телефон: сохранённые файлы класса не оставляем
   await api('/api/leave', { method: 'POST' }).catch(() => {});
   showJoin('');
 }
@@ -176,8 +179,13 @@ function render(data) {
   $('#cls-count').textContent = `${who}${data.materials.length} материал`;
   $('#leave').textContent = data.student ? 'Шығу' : 'Сыныпты ауыстыру';
   $('#preview').hidden = !data.preview;
+  state.offline = false;
+  $('#offline-note').hidden = true;
+  $('#leave').hidden = false;
   show('main');
   renderList();
+  if (!data.preview) offline.remember(data);
+  offline.refresh();
 }
 
 function renderList() {
@@ -207,7 +215,10 @@ function renderList() {
 function card(m) {
   const k = KINDS[m.kind] || KINDS.link;
   let action = '';
-  if (m.action === 'open') {
+  const saved = offline.ids.has(String(m.id));
+  if (state.offline && !(m.file && saved)) {
+    action = '<span class="need-net">📶 Интернет керек</span>';
+  } else if (m.action === 'open') {
     action = `<a class="btn" href="${m.href}" target="_blank" rel="noopener">Ашу</a>
               <a class="btn btn-icon" href="${m.href}?dl=1" aria-label="Жүктеу">⬇</a>`;
   } else if (m.action === 'download') {
@@ -224,7 +235,7 @@ function card(m) {
       <h3>${esc(m.title)}${m.isNew ? '<span class="badge-new">Жаңа</span>' : ''}</h3>
       <div class="meta"><span class="kind-name">${k.name}</span><span>${esc(m.topic)}</span><span>${fmtDate(m.date)}</span>${extra}</div>
     </div>
-    <div class="actions">${action}${quizBlock(m)}${hwBlock(m)}</div>
+    <div class="actions">${action}${m.file && offline.supported ? saveBtn(m, saved) : ''}${state.offline ? '' : quizBlock(m) + hwBlock(m)}</div>
   </article>`;
 }
 
@@ -520,6 +531,126 @@ $('#hw-form').addEventListener('submit', async (e) => {
   } finally {
     btn.disabled = false;
   }
+});
+
+// ---------- Материалы без интернета ----------
+// Файлы сохраняются в кеш браузера на этом телефоне (Cache API); список материалов — в localStorage.
+// Сервис-воркер отдаёт сохранённый файл, только когда сети нет; при сети доступ проверяет сервер.
+const offline = {
+  CACHE: 'offline-files',
+  supported: 'caches' in window && window.isSecureContext && 'serviceWorker' in navigator,
+  ids: new Set(),
+  bytes: 0,
+  async refresh() {
+    if (!this.supported) return;
+    const c = await caches.open(this.CACHE);
+    const keys = await c.keys();
+    this.ids = new Set(keys.map((r) => new URL(r.url).pathname.split('/')[2]));
+    this.bytes = 0;
+    for (const m of state.materials) if (m.file && this.ids.has(String(m.id))) this.bytes += m.file.size;
+    renderOfflineBar();
+    renderList();
+  },
+  async save(m) {
+    const res = await fetch(m.href, { credentials: 'same-origin' });
+    if (!res.ok) throw new Error('Файл жүктелмеді');
+    await (await caches.open(this.CACHE)).put(m.href, res);
+    navigator.storage?.persist?.().catch(() => {}); // просим браузер не удалять сохранённое
+  },
+  async remove(m) {
+    await (await caches.open(this.CACHE)).delete(m.href);
+  },
+  remember(data) {
+    // только то, что нужно для показа списка; ответы и фото не сохраняются
+    const list = data.materials.map(({ id, title, topic, kind, date, file, href, action }) => ({ id, title, topic, kind, date, file, href, action }));
+    try {
+      localStorage.setItem('offlineList', JSON.stringify({ class: data.class, student: data.student, materials: list, at: Date.now() }));
+    } catch {}
+  },
+  load() {
+    try { return JSON.parse(localStorage.getItem('offlineList')); } catch { return null; }
+  },
+  async clear() {
+    try { localStorage.removeItem('offlineList'); } catch {}
+    if (this.supported) await caches.delete(this.CACHE).catch(() => {});
+    this.ids = new Set();
+  },
+};
+
+function saveBtn(m, saved) {
+  if (state.offline) return saved ? '<span class="saved-tag">📥 Телефонда</span>' : '';
+  return saved
+    ? `<button class="btn btn-icon saved" type="button" data-off="del" data-id="${m.id}" title="Телефоннан өшіру">✅📥</button>`
+    : `<button class="btn btn-icon" type="button" data-off="save" data-id="${m.id}" title="Интернетсіз ашу үшін телефонға сақтау">📥</button>`;
+}
+
+function renderOfflineBar() {
+  const bar = $('#offline-bar');
+  const files = state.materials.filter((m) => m.file);
+  if (!offline.supported || state.offline || !files.length) return (bar.hidden = true);
+  const n = files.filter((m) => offline.ids.has(String(m.id))).length;
+  bar.hidden = false;
+  bar.innerHTML = `<span>📥 Интернетсіз ашу үшін: <b>${n}/${files.length}</b> файл сақталған${n ? ` · ${fmtSize(offline.bytes)}` : ''}</span>
+    ${n < files.length ? '<button class="btn btn-blue btn-sm" type="button" data-off="all">Барлығын сақтау</button>' : ''}
+    ${n ? '<button class="btn btn-light btn-sm" type="button" data-off="clear">Тазалау</button>' : ''}`;
+}
+
+async function showOffline() {
+  const snap = offline.load();
+  if (!snap) return false;
+  state.offline = true;
+  state.student = snap.student;
+  state.materials = snap.materials;
+  if (offline.supported) {
+    const keys = await (await caches.open(offline.CACHE)).keys();
+    offline.ids = new Set(keys.map((r) => new URL(r.url).pathname.split('/')[2]));
+  }
+  $('#cls-name').textContent = snap.class.name;
+  $('#cls-count').textContent = `${snap.student ? `👤 ${snap.student.name} · ` : ''}${snap.materials.length} материал`;
+  $('#leave').hidden = true;
+  $('#preview').hidden = true;
+  $('#offline-bar').hidden = true;
+  const at = new Date(snap.at);
+  $('#offline-note').innerHTML = `📴 Интернет жоқ. Тізім ${at.getDate()} ${MONTHS[at.getMonth()]}, ${String(at.getHours()).padStart(2, '0')}:${String(at.getMinutes()).padStart(2, '0')} күйінде.
+    Телефонға сақталған файлдар ашылады. <button class="btn btn-light btn-sm" type="button" id="offline-retry">🔄 Қайталау</button>`;
+  $('#offline-note').hidden = false;
+  $('#offline-retry').addEventListener('click', () => location.reload());
+  show('main');
+  renderList();
+  return true;
+}
+window.addEventListener('online', () => state.offline && location.reload());
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-off]');
+  if (!b) return;
+  const act = b.dataset.off;
+  const files = state.materials.filter((m) => m.file);
+  try {
+    if (act === 'save' || act === 'del') {
+      const m = state.materials.find((x) => String(x.id) === b.dataset.id);
+      b.disabled = true;
+      if (act === 'save') {
+        b.textContent = '⏳';
+        await offline.save(m);
+        toast('Сақталды — енді интернетсіз де ашылады');
+      } else await offline.remove(m);
+    } else if (act === 'all') {
+      const todo = files.filter((m) => !offline.ids.has(String(m.id)));
+      b.disabled = true;
+      for (let i = 0; i < todo.length; i++) {
+        b.textContent = `⏳ ${i + 1}/${todo.length}`;
+        await offline.save(todo[i]);
+      }
+      toast(`Сақталды: ${todo.length} файл`);
+    } else if (act === 'clear') {
+      if (!(await confirmBox('Телефонға сақталған барлық файлдар өшіріледі. Интернет болса, қайта сақтауға болады.', 'Иә, өшіру'))) return;
+      await caches.delete(offline.CACHE);
+    }
+  } catch (err) {
+    toast(err.status === 0 || err instanceof TypeError ? 'Интернет жоқ — кейін сақтаңыз' : err.message, true);
+  }
+  await offline.refresh();
 });
 
 initInstall(document.querySelector('.wrap'));
