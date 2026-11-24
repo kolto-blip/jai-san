@@ -233,3 +233,7 @@
 .qed-foot .btn-green { min-width: 140px; }
 .qe-prev { font-size: 17px; padding: 6px 10px; border-radius: 10px; background: #f3eeff; color: var(--ink); }
 .qe-prev { font-weight: 600; }
+.qed-count { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 10px 0; }
+.qed-count label { font-weight: 800; }
+.qed-count input { width: 90px; min-height: 44px; padding: 4px 10px; border-radius: 12px; border: 2px solid var(--line); font-size: 18px; font-weight: 800; }
+.qed-count .hint { flex: 1; min-width: 200px; }

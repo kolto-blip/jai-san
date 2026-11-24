@@ -842,7 +842,10 @@ $('#qed-open').addEventListener('click', () => {
   // вопросов ещё нет — создаём по ключу из поля (если он уже вписан)
   if (!S.questions.length) {
     const keys = $('#quiz-answers').value.split('\n').map((x) => x.trim().toUpperCase()).filter(Boolean);
-    S.questions = (keys.length ? keys : ['']).map((k) => ({ text: '', options: Array(L.length).fill(''), img: null, key: k.replace(/[^A-H]/g, '') }));
+    // по умолчанию 40 мест — как в ЕНТ по математике (или столько, сколько строк в ключе)
+    const n = keys.length || 40;
+    S.questions = Array.from({ length: n }, (_, i) => ({ text: '', options: Array(L.length).fill(''), img: null, key: (keys[i] || '').replace(/[^A-H]/g, '') }));
+    qFocus = 0;
   }
   for (const q of S.questions) {
     q.options = Array.from({ length: L.length }, (_, j) => q.options?.[j] || '');
@@ -851,6 +854,7 @@ $('#qed-open').addEventListener('click', () => {
   const keys = $('#quiz-answers').value.split('\n').map((x) => x.trim().toUpperCase());
   S.questions.forEach((q, i) => (q.key ||= (keys[i] || '').replace(/[^A-H]/g, '')));
   $('#qed-error').textContent = '';
+  $('#qed-n').value = S.questions.length;
   renderQed();
   qed.showModal();
 });
@@ -908,6 +912,7 @@ $('#qed-list').addEventListener('click', async (e) => {
     if (!(await confirmBox(`${i + 1}-сұрақ жойылады.`))) return;
     S.questions.splice(i, 1);
     if (!S.questions.length) S.questions.push(blankQ());
+    $('#qed-n').value = S.questions.length;
   } else if (b.dataset.qa === 'up') {
     [S.questions[i - 1], S.questions[i]] = [S.questions[i], S.questions[i - 1]];
   } else if (b.dataset.qa === 'rmimg') {
@@ -927,9 +932,23 @@ $('#qed-list').addEventListener('click', async (e) => {
 function blankQ() {
   return { text: '', options: Array(qLetters().length).fill(''), img: null, key: '' };
 }
+$('#qed-n').addEventListener('change', async () => {
+  const n = Math.max(1, Math.min(50, Number($('#qed-n').value) || 1));
+  const cut = S.questions.slice(n).filter((q) => q.img || q.text.trim() || q.key).length;
+  if (cut && !(await confirmBox(`Соңғы ${S.questions.length - n} сұрақ өшіріледі (${cut} толтырылған).`, 'Иә'))) {
+    $('#qed-n').value = S.questions.length;
+    return;
+  }
+  while (S.questions.length < n) S.questions.push(blankQ());
+  S.questions.length = n;
+  qFocus = Math.min(qFocus, n - 1);
+  renderQed();
+});
+
 $('#qed-add').addEventListener('click', () => {
   S.questions.push(blankQ());
   qFocus = S.questions.length - 1;
+  $('#qed-n').value = S.questions.length;
   renderQed();
   $('#qed-list').lastElementChild.scrollIntoView({ behavior: 'smooth' });
 });
@@ -985,8 +1004,11 @@ async function setQImage(i, file) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Сурет жүктелмеді');
     S.questions[i].img = data.img;
+    // следующий вопрос — чтобы вставлять скриншоты подряд
+    if (i === qFocus && i + 1 < S.questions.length) qFocus = i + 1;
     renderQed();
-    toast(`${i + 1}-сұраққа сурет қойылды`);
+    document.querySelector(`.qe[data-qi="${qFocus}"]`)?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    toast(`${i + 1}-сұраққа сурет қойылды${qFocus !== i ? ` · келесі: ${qFocus + 1}` : ''}`);
   } catch (err) {
     toast(err.message, true);
   }

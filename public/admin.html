@@ -212,6 +212,11 @@
       </div>
       <p class="hint">Әр сұраққа: <b>скриншот</b> (PDF-тен немесе кітаптан сұрақты қиып алып, суретке <b>Ctrl+V</b>) және/немесе мәтін.
         Нұсқалар суретте көрінсе, оларды жазу міндетті емес. Дұрыс жауаптарға <b>✓</b> қойыңыз — кілт өзі құралады.</p>
+      <div class="qed-count">
+        <label for="qed-n">Сұрақ саны</label>
+        <input id="qed-n" type="number" min="1" max="50" value="40">
+        <span class="hint">Скриншотты қойғаннан кейін келесі сұрақ өзі таңдалады — Ctrl+V, ✓, Ctrl+V, ✓…</span>
+      </div>
       <div class="qed-list" id="qed-list"></div>
       <div class="form-error" id="qed-error" role="alert"></div>
       <div class="qed-foot">
