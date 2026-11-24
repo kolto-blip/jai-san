@@ -73,11 +73,37 @@ export function entPoints(given, key) {
   return { points: diff === 0 ? 2 : diff === 1 ? 1 : 0, max: 2 };
 }
 
+// Формат ЕНТ «бейіндік математика»: 40 вопросов, 50 баллов
+export const PROFILE_TYPES = Array.from({ length: 40 }, (_, i) => (i < 25 ? 'one' : i < 30 ? 'ctx' : i < 35 ? 'match' : 'many'));
+export const TYPE_LETTERS = { one: 4, ctx: 4, match: 4, many: 6 };
+
+// Сәйкестендіру: «B,D» / «BD» / «1-B 2-D» → «B,D» (порядок важен: 1→B, 2→D)
+export function matchPairs(s) {
+  const up = String(s ?? '').toUpperCase().replace(/[АВСЕ]/g, (c) => CYR[c]);
+  const parts = up.includes(',') ? up.split(',') : [...up.replace(/[^A-H]/g, '')];
+  return parts.map((p) => (p.match(/[A-H]/) || [''])[0]).slice(0, 2);
+}
+
+function typedPoints(given, key, type) {
+  if (type === 'match') {
+    const g = matchPairs(given);
+    const k = matchPairs(key);
+    return { points: k.filter((c, i) => c && g[i] === c).length, max: 2 };
+  }
+  if (type === 'many') {
+    const r = entPoints(given, key);
+    return { points: r.max === 2 ? r.points : r.points * 2, max: 2 }; // в этом разделе всегда 2 балла
+  }
+  const g = entLetters(given);
+  return { points: g.length === 1 && g === entLetters(key) ? 1 : 0, max: 1 };
+}
+
 // quiz — объект ключа ({ answers, ent? }) или просто массив ответов
 export function grade(answers, quiz) {
   const key = Array.isArray(quiz) ? quiz : quiz.answers;
   if (!Array.isArray(quiz) && quiz.ent) {
-    const pts = key.map((k, i) => entPoints(answers[i], k));
+    const types = quiz.ent.types;
+    const pts = key.map((k, i) => (types ? typedPoints(answers[i], k, types[i]) : entPoints(answers[i], k)));
     return {
       marks: pts.map((p) => p.points === p.max),
       points: pts.map((p) => p.points),

@@ -144,12 +144,17 @@
               <div class="quiz-opts">
                 <label class="pick"><input type="checkbox" id="quiz-ent"><span>🎯 ЕНТ нұсқасы (әріптер, таймер)</span></label>
                 <div class="ent-opts" id="ent-opts" hidden>
+                  <label class="span-all">Формат <select id="ent-format">
+                    <option value="profile">ЕНТ: 40 сұрақ, 50 балл</option>
+                    <option value="free">Еркін формат (өзім белгілеймін)</option>
+                  </select></label>
+                  <div class="ent-format-info span-all" id="ent-format-info">1–25 · бір жауап (A–D) · 26–30 · контекст · 31–35 · сәйкестендіру · 36–40 · бірнеше жауап (A–F)</div>
                   <label>Пән <select id="ent-subject">
                     <option>Математика</option><option>Математикалық сауаттылық</option>
                   </select></label>
                   <label>Таймер, мин <input id="ent-minutes" type="number" min="0" max="300" placeholder="Таймерсіз"></label>
                   <button class="btn btn-purple btn-sm span-all" type="button" id="qed-open">📝 Сұрақтарды бөлек экранға енгізу</button>
-                  <label>Әріптер <select id="ent-letters"><option value="4">A–D</option><option value="5" selected>A–E</option><option value="6">A–F</option><option value="8">A–H</option></select></label>
+                  <label id="ent-letters-wrap">Әріптер <select id="ent-letters"><option value="4">A–D</option><option value="5" selected>A–E</option><option value="6">A–F</option><option value="8">A–H</option></select></label>
                 </div>
                 <label class="pick"><input type="checkbox" id="quiz-open" checked><span>Жауап қабылдау ашық</span></label>
                 <label class="pick"><input type="checkbox" id="quiz-retry"><span>Қайта тапсыруға болады</span></label>
@@ -213,7 +218,7 @@
       <p class="hint">Әр сұраққа: <b>скриншот</b> (PDF-тен немесе кітаптан сұрақты қиып алып, суретке <b>Ctrl+V</b>) және/немесе мәтін.
         Нұсқалар суретте көрінсе, оларды жазу міндетті емес. Дұрыс жауаптарға <b>✓</b> қойыңыз — кілт өзі құралады.</p>
       <div class="qed-count">
-        <label for="qed-n">Сұрақ саны</label>
+        <label for="qed-n" id="qed-n-label">Сұрақ саны</label>
         <input id="qed-n" type="number" min="1" max="50" value="40">
         <span class="hint">Скриншотты қойғаннан кейін келесі сұрақ өзі таңдалады — Ctrl+V, ✓, Ctrl+V, ✓…</span>
       </div>

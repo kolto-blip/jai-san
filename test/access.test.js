@@ -595,6 +595,52 @@ function suite(label, makeEnv) {
       assert.equal((await s9.req(up.url)).status, 404);
     });
 
+    test('ЕНТ формат: 40 сұрақ, 50 балл, сәйкестендіру и контекст', async () => {
+      const a = admin();
+      await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      const key = [...Array(25).fill('B'), ...Array(5).fill('C'), ...Array(5).fill('B,D'), ...Array(5).fill('ACE')];
+      const questions = key.map((_, i) => ({ text: `${i + 1}-сұрақ 3/4`, options: [], items: i >= 30 && i < 35 ? ['бірінші', 'екінші'] : undefined }));
+      const base = { title: 'ЕНТ толық', topic: 'ЕНТ', type: 'link', url: 'https://example.com/', allClasses: true };
+      // неправильный ключ по разделам не принимается
+      const bad1 = await a.req('/api/admin/materials', { method: 'POST', json: { ...base, quiz: { answers: key.slice(0, 39), ent: { format: 'profile' } } } });
+      assert.equal(bad1.status, 400, '39 сұрақ — қате');
+      const bad2 = await a.req('/api/admin/materials', { method: 'POST', json: { ...base, quiz: { answers: ['AB', ...key.slice(1)], ent: { format: 'profile' } } } });
+      assert.equal(bad2.status, 400, '1–30: тек бір әріп');
+      const bad3 = await a.req('/api/admin/materials', { method: 'POST', json: { ...base, quiz: { answers: [...key.slice(0, 30), 'E,A', ...key.slice(31)], ent: { format: 'profile' } } } });
+      assert.equal(bad3.status, 400, 'сәйкестендіру: A–D');
+      const res = await a.req('/api/admin/materials', {
+        method: 'POST',
+        json: { ...base, quiz: { answers: key, retry: true, show: true, ent: { format: 'profile', context: { text: 'Ортақ мәтін' }, questions } } },
+      });
+      assert.equal(res.status, 201, await res.clone().text());
+      const mat = await res.json();
+
+      const s = client(srv.base);
+      await s.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
+      const pub = (await (await s.req('/api/materials')).json()).materials.find((m) => m.id === mat.id);
+      assert.equal(pub.quiz.ent.types[0], 'one');
+      assert.equal(pub.quiz.ent.types[27], 'ctx');
+      assert.equal(pub.quiz.ent.types[32], 'match');
+      assert.equal(pub.quiz.ent.types[39], 'many');
+      assert.equal(pub.quiz.ent.context.text, 'Ортақ мәтін');
+      assert.deepEqual(pub.quiz.ent.questions[31].items, ['бірінші', 'екінші']);
+      assert.equal(pub.quiz.ent.questions[36].options.length, 6, '36–40: A–F');
+      assert.ok(!JSON.stringify(pub).includes('B,D'), 'ключ не отдаётся');
+
+      const full = await (await s.req(`/api/quiz/${mat.id}`, { method: 'POST', json: { name: 'Тест', answers: key } })).json();
+      assert.equal(full.total, 50);
+      assert.equal(full.score, 50);
+      // 31: одна пара верна → 1; 36: одна лишняя буква → 1; 1: две буквы на «бір жауап» → 0
+      const part = [...key];
+      part[0] = 'BC';
+      part[30] = 'B,A';
+      part[35] = 'ACDE';
+      const r = await (await s.req(`/api/quiz/${mat.id}`, { method: 'POST', json: { name: 'Тест', answers: part } })).json();
+      assert.equal(r.score, 47);
+      assert.deepEqual([r.points[0], r.points[30], r.points[35]], [0, 1, 1]);
+      await a.req(`/api/admin/materials/${mat.id}`, { method: 'DELETE' });
+    });
+
     test('подбор кода класса блокируется по IP', async () => {
       const s = client(srv.base);
       let last;

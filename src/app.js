@@ -9,7 +9,7 @@ import { openRepo } from './db/index.js';
 import { createStorages } from './storage/index.js';
 import { createAuth, adminMode } from './auth.js';
 import { FailureLimiter } from './ratelimit.js';
-import { grade, nameKey, entLetters } from './grade.js';
+import { grade, nameKey, entLetters, matchPairs, PROFILE_TYPES, TYPE_LETTERS } from './grade.js';
 import { aiConfig, checkHomework, AiError } from './ai.js';
 import {
   HttpError, readBody, readJson, sendJson, parseCookies, cookie, clientIp, generateCode, normalizeCode,
@@ -132,10 +132,16 @@ export async function createApp() {
       out.quiz = { count: m.quiz.answers.length, open: m.quiz.open, retry: m.quiz.retry };
       if (m.quiz.ent) {
         // какие вопросы с несколькими ответами — это написано и в самом варианте; сами буквы не отдаём
-        out.quiz.ent = { ...m.quiz.ent, multi: m.quiz.answers.map((a) => entLetters(a).length > 1) };
+        const types = m.quiz.ent.types;
+        out.quiz.ent = {
+          ...m.quiz.ent,
+          multi: m.quiz.answers.map((a, i) => (types ? types[i] === 'many' : entLetters(a).length > 1)),
+          context: m.quiz.ent.context
+            ? { text: m.quiz.ent.context.text, img: m.quiz.ent.context.img ? `/qimg/${m.quiz.ent.context.img.key}` : null } : undefined,
+        };
         if (m.quiz.ent.questions) {
           out.quiz.ent.questions = m.quiz.ent.questions.map((x) => ({
-            text: x.text, options: x.options, img: x.img ? `/qimg/${x.img.key}` : null,
+            text: x.text, options: x.options, items: x.items, img: x.img ? `/qimg/${x.img.key}` : null,
           }));
         }
       }
@@ -185,12 +191,25 @@ export async function createApp() {
     if (answers.some((a) => !a)) throw new HttpError(400, 'Жауап кілтінде бос жол бар');
     const out = { answers, open: q.open !== false, retry: Boolean(q.retry), show: Boolean(q.show) };
     if (q.ent) {
-      const letters = Math.min(8, Math.max(4, Number(q.ent.letters) || 5));
-      const allowed = 'ABCDEFGH'.slice(0, letters);
+      const profile = q.ent.format === 'profile';
+      if (profile && answers.length !== 40) throw new HttpError(400, `ЕНТ форматында 40 сұрақ болуы керек (қазір ${answers.length})`);
+      const types = profile ? PROFILE_TYPES : null;
+      const letters = profile ? 6 : Math.min(8, Math.max(4, Number(q.ent.letters) || 5));
       out.answers = answers.map((a, i) => {
+        const t = types?.[i];
+        const n = t ? TYPE_LETTERS[t] : letters;
+        const allowed = 'ABCDEFGH'.slice(0, n);
+        const range = `${allowed[0]}–${allowed[n - 1]}`;
+        if (t === 'match') {
+          const p = matchPairs(a);
+          if (p.length !== 2 || p.some((c) => !c || !allowed.includes(c))) {
+            throw new HttpError(400, `${i + 1}-сұрақ (сәйкестендіру): екі әріп керек, мысалы B,D (${range})`);
+          }
+          return p.join(',');
+        }
         const l = entLetters(a);
-        if (!l || [...l].some((c) => !allowed.includes(c))) {
-          throw new HttpError(400, `ЕНТ кілтінің ${i + 1}-жолы: тек ${allowed[0]}–${allowed[letters - 1]} әріптері (мысалы: B немесе ACE)`);
+        if (!l || [...l].some((c) => !allowed.includes(c)) || ((t === 'one' || t === 'ctx') && l.length !== 1)) {
+          throw new HttpError(400, `ЕНТ кілтінің ${i + 1}-жолы: ${t === 'one' || t === 'ctx' ? `бір әріп (${range})` : `тек ${range} әріптері (мысалы: B немесе ACE)`}`);
         }
         return l;
       });
@@ -199,16 +218,29 @@ export async function createApp() {
         minutes: Math.min(300, Math.max(0, Math.round(Number(q.ent.minutes) || 0))), // 0 — без таймера
         subject: String(q.ent.subject || 'Математика').trim().slice(0, 60),
       };
+      if (profile) {
+        out.ent.format = 'profile';
+        out.ent.types = PROFILE_TYPES;
+      }
+      const cleanImg = (img) => (img && /^qi-[0-9a-f]{32}$/.test(img.key) && ['db', 'local', 'b2'].includes(img.storage)
+        ? { key: img.key, storage: img.storage } : null);
+      // общий текст/рисунок для контекстных вопросов 26–30
+      if (profile && q.ent.context && (q.ent.context.text || q.ent.context.img)) {
+        out.ent.context = { text: String(q.ent.context.text || '').trim().slice(0, 4000), img: cleanImg(q.ent.context.img) };
+      }
       // Вопросы для показа по одному на экране (необязательно; без них — PDF + бланк)
       if (Array.isArray(q.ent.questions) && q.ent.questions.length) {
         if (q.ent.questions.length !== out.answers.length) throw new HttpError(400, 'Сұрақтар саны мен кілт саны сәйкес емес');
         out.ent.questions = q.ent.questions.map((x, i) => {
-          const img = x?.img && /^qi-[0-9a-f]{32}$/.test(x.img.key) && ['db', 'local', 'b2'].includes(x.img.storage)
-            ? { key: x.img.key, storage: x.img.storage } : null;
+          const img = cleanImg(x?.img);
           const text = String(x?.text || '').trim().slice(0, 3000);
           if (!text && !img) throw new HttpError(400, `${i + 1}-сұрақ бос: мәтін жазыңыз немесе сурет қойыңыз`);
-          const options = Array.from({ length: letters }, (_, j) => String(x?.options?.[j] || '').trim().slice(0, 400));
-          return { text, img, options };
+          const t = types?.[i];
+          const n = t ? TYPE_LETTERS[t] : letters;
+          const options = Array.from({ length: n }, (_, j) => String(x?.options?.[j] || '').trim().slice(0, 400));
+          const out1 = { text, img, options };
+          if (t === 'match') out1.items = [0, 1].map((j) => String(x?.items?.[j] || '').trim().slice(0, 400));
+          return out1;
         });
       }
     }
@@ -577,7 +609,7 @@ export async function createApp() {
   const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
 
   // ---------- Картинки вопросов ЕНТ ----------
-  const quizImages = (quiz) => (quiz?.ent?.questions || []).map((x) => x.img).filter(Boolean);
+  const quizImages = (quiz) => [...(quiz?.ent?.questions || []).map((x) => x.img), quiz?.ent?.context?.img].filter(Boolean);
 
   async function dropUnusedQuizImages(oldQuiz, newQuiz) {
     const keep = new Set(quizImages(newQuiz).map((x) => x.key));

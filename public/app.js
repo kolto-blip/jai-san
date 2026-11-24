@@ -723,30 +723,69 @@ function openEnt(m) {
   }
 }
 
+// Тип вопроса: one / ctx (контекст) / match (сәйкестендіру) / many (бірнеше жауап)
+const SECTION = {
+  one: '1–25 · бір дұрыс жауап', ctx: '26–30 · контекстік тапсырмалар',
+  match: '31–35 · сәйкестендіру', many: '36–40 · бірнеше дұрыс жауап',
+};
+const qType = (i) => (E.mat.quiz.ent.types ? E.mat.quiz.ent.types[i] : E.mat.quiz.ent.multi[i] ? 'many' : 'one');
+const qLetters = (i) => (E.mat.quiz.ent.types ? { one: 4, ctx: 4, match: 4, many: 6 }[qType(i)] : E.mat.quiz.ent.letters);
+const maxPts = (i) => (qType(i) === 'match' || qType(i) === 'many' ? 2 : 1);
+const sectionStart = (i) => E.mat.quiz.ent.types && (i === 0 || qType(i) !== qType(i - 1));
+
+function pressed(i, L, item) {
+  const a = E.ans[i] || '';
+  return qType(i) === 'match' ? (a.split(',')[item] || '') === L : a.includes(L);
+}
+
+function toggleAns(i, L, item) {
+  let a = E.ans[i] || '';
+  const t = qType(i);
+  if (t === 'match') {
+    const p = a ? a.split(',') : ['', ''];
+    p[item] = p[item] === L ? '' : L;
+    a = p.some(Boolean) ? p.join(',') : '';
+  } else if (t === 'many') a = a.includes(L) ? a.replace(L, '') : [...a + L].sort().join('');
+  else a = a === L ? '' : L;
+  E.ans[i] = a;
+  local.set(entKey(E.mat, 'ans'), E.ans);
+}
+
+function fmtAns(i, a) {
+  if (qType(i) === 'match') {
+    const p = String(a || '').split(',');
+    return p.some((x) => x && x !== '-') ? `1→${p[0] || '?'}, 2→${p[1] || '?'}` : '—';
+  }
+  return String(a || '').replace('-', '') || '—';
+}
+
+function bubbles(i, item) {
+  return [...LETTERS.slice(0, qLetters(i))].map((L) =>
+    `<button class="bub" type="button" data-l="${L}" ${item !== undefined ? `data-item="${item}"` : ''} aria-pressed="${pressed(i, L, item)}" aria-label="${i + 1}-сұрақ${item !== undefined ? `, ${item + 1}` : ''}, ${L}">${L}</button>`).join('');
+}
+
 function renderSheet() {
-  const e = E.mat.quiz.ent;
   $('#ent-sheet').innerHTML = Array.from({ length: E.mat.quiz.count }, (_, i) => {
     const a = E.ans[i] || '';
-    return `<div class="ent-row ${a ? 'done' : ''}" data-q="${i}"><span class="ent-no">${i + 1}.</span>
-      ${[...LETTERS.slice(0, e.letters)].map((L) => `<button class="bub" type="button" data-l="${L}" aria-pressed="${a.includes(L)}" aria-label="${i + 1}-сұрақ, ${L}">${L}</button>`).join('')}
-      ${e.multi[i] ? '<span class="ent-multi">бірнеше жауап</span>' : ''}</div>`;
+    const head = sectionStart(i) ? `<div class="ent-section">${SECTION[qType(i)]}</div>` : '';
+    if (qType(i) === 'match') {
+      return `${head}<div class="ent-row ${a ? 'done' : ''}" data-q="${i}"><span class="ent-no">${i + 1}.</span>
+        <div class="ent-match"><div><span class="mi">1 →</span>${bubbles(i, 0)}</div><div><span class="mi">2 →</span>${bubbles(i, 1)}</div></div></div>`;
+    }
+    return `${head}<div class="ent-row ${a ? 'done' : ''}" data-q="${i}"><span class="ent-no">${i + 1}.</span>${bubbles(i)}
+      ${qType(i) === 'many' && !E.mat.quiz.ent.types ? '<span class="ent-multi">бірнеше жауап</span>' : ''}</div>`;
   }).join('');
 }
 
 $('#ent-sheet').addEventListener('click', (e) => {
   const b = e.target.closest('.bub');
   if (!b) return;
-  const i = Number(b.closest('[data-q]').dataset.q);
-  const multi = E.mat.quiz.ent.multi[i];
-  let a = E.ans[i] || '';
-  const L = b.dataset.l;
-  if (multi) a = a.includes(L) ? a.replace(L, '') : [...a + L].sort().join('');
-  else a = a === L ? '' : L;
-  E.ans[i] = a;
-  local.set(entKey(E.mat, 'ans'), E.ans);
   const row = b.closest('[data-q]');
-  row.classList.toggle('done', Boolean(a));
-  row.querySelectorAll('.bub').forEach((x) => x.setAttribute('aria-pressed', String(a.includes(x.dataset.l))));
+  const i = Number(row.dataset.q);
+  toggleAns(i, b.dataset.l, b.dataset.item !== undefined ? Number(b.dataset.item) : undefined);
+  row.classList.toggle('done', Boolean(E.ans[i]));
+  row.querySelectorAll('.bub').forEach((x) =>
+    x.setAttribute('aria-pressed', String(pressed(i, x.dataset.l, x.dataset.item !== undefined ? Number(x.dataset.item) : undefined))));
 });
 
 // ---- один вопрос на экране ----
@@ -755,15 +794,37 @@ function renderQuestion() {
   const e = m.quiz.ent;
   const i = E.cur;
   const q = e.questions[i];
-  const a = E.ans[i] || '';
+  const t = qType(i);
   $('#ent-nav').innerHTML = Array.from({ length: m.quiz.count }, (_, k) =>
-    `<button type="button" data-go="${k}" class="${E.ans[k] ? 'done' : ''} ${k === i ? 'cur' : ''}" aria-label="${k + 1}-сұрақ">${k + 1}</button>`).join('');
+    `${sectionStart(k) && k ? '<span class="nav-gap"></span>' : ''}<button type="button" data-go="${k}" class="${E.ans[k] ? 'done' : ''} ${k === i ? 'cur' : ''}" aria-label="${k + 1}-сұрақ">${k + 1}</button>`).join('');
+  const opts = q.options || [];
+  const hasText = opts.some(Boolean);
+  let answer;
+  if (t === 'match') {
+    // сәйкестендіру: варианты A–D списком, ниже — выбор для 1 и 2
+    answer = `${hasText ? `<div class="ent-optlist">${opts.map((o, j) => o ? `<div><b>${LETTERS[j]})</b> ${mathHtml(o)}</div>` : '').join('')}</div>` : ''}
+      <div class="ent-match big"><div><span class="mi">1 →</span>${bubbles(i, 0)}</div><div><span class="mi">2 →</span>${bubbles(i, 1)}</div></div>`;
+  } else {
+    answer = `<div class="ent-opts ${hasText ? '' : 'compact'}">${[...LETTERS.slice(0, qLetters(i))].map((L, j) =>
+      `<button class="ent-opt" type="button" data-l="${L}" aria-pressed="${pressed(i, L)}" aria-label="${L}"><span class="L">${L}</span>${opts[j] ? `<span>${mathHtml(opts[j])}</span>` : ''}</button>`).join('')}</div>`;
+  }
+  const ctx = t === 'ctx' && e.context
+    ? `<details class="ent-ctx" open><summary>📖 Контекст (26–30 сұрақтарға ортақ)</summary>
+        ${e.context.img ? `<img class="ent-qimg" src="${e.context.img}" alt="Контекст">` : ''}
+        ${e.context.text ? `<div class="ent-qtext">${mathHtml(e.context.text)}</div>` : ''}</details>` : '';
+  const items = t === 'match' && q.items?.some(Boolean)
+    ? `<div class="ent-items">${q.items.map((x, j) => (x ? `<div><b>${j + 1})</b> ${mathHtml(x)}</div>` : '')).join('')}</div>` : '';
   $('#ent-qcard').innerHTML = `
-    <div class="ent-qno">${i + 1} / ${m.quiz.count}${e.multi[i] ? '<span class="ent-multi">бірнеше жауап</span>' : ''}</div>
+    ${e.types ? `<div class="ent-section">${SECTION[t]}</div>` : ''}
+    <div class="ent-qno">${i + 1} / ${m.quiz.count}${t === 'many' ? '<span class="ent-multi">бірнеше жауап</span>' : ''}
+      <span class="ent-pts">${maxPts(i)} балл</span></div>
+    ${ctx}
     ${q.img ? `<img class="ent-qimg" src="${q.img}" alt="${i + 1}-сұрақ">` : ''}
     ${q.text ? `<div class="ent-qtext">${mathHtml(q.text)}</div>` : ''}
-    <div class="ent-opts ${q.options.some(Boolean) ? '' : 'compact'}">${[...LETTERS.slice(0, e.letters)].map((L, j) =>
-      `<button class="ent-opt" type="button" data-l="${L}" aria-pressed="${a.includes(L)}" aria-label="${L}"><span class="L">${L}</span>${q.options[j] ? `<span>${mathHtml(q.options[j])}</span>` : ''}</button>`).join('')}</div>`;
+    ${items}
+    ${answer}`;
+  // текущий номер — в центр полосы
+  $('#ent-nav .cur')?.scrollIntoView({ inline: 'center', block: 'nearest' });
   $('#ent-prev').disabled = i === 0;
   const last = i === m.quiz.count - 1;
   $('#ent-next').textContent = last ? 'Аяқтау ✓' : 'Келесі →';
@@ -781,15 +842,9 @@ function goQuestion(k) {
 }
 
 $('#ent-qcard').addEventListener('click', (e) => {
-  const b = e.target.closest('.ent-opt');
+  const b = e.target.closest('.ent-opt, .bub');
   if (!b) return;
-  const i = E.cur;
-  const L = b.dataset.l;
-  let a = E.ans[i] || '';
-  if (E.mat.quiz.ent.multi[i]) a = a.includes(L) ? a.replace(L, '') : [...a + L].sort().join('');
-  else a = a === L ? '' : L;
-  E.ans[i] = a;
-  local.set(entKey(E.mat, 'ans'), E.ans);
+  toggleAns(E.cur, b.dataset.l, b.dataset.item !== undefined ? Number(b.dataset.item) : undefined);
   renderQuestion();
 });
 $('#ent-nav').addEventListener('click', (e) => {
@@ -870,11 +925,11 @@ function showEntResult(r, answers, auto) {
       <div class="big ${cls}">${r.score}/${r.total}</div><div><b>балл · ${pct}%</b></div></div>
     <div class="ent-sheet">${answers.map((a, i) => {
       const p = r.points[i];
-      const max = E.mat.quiz.ent.multi[i] ? 2 : 1;
+      const max = maxPts(i);
       const c = p === max ? '' : p > 0 ? 'half' : 'bad';
-      return `<div class="ent-res-row ${c}"><span>${i + 1}.</span>
-        <span><small>Сіз</small>${esc(a.replace('-', '') || '—')}</span>
-        <span>${r.correct ? `<small>Дұрысы</small>${esc(r.correct[i])}` : ''}</span>
+      return `${sectionStart(i) ? `<div class="ent-section">${SECTION[qType(i)]}</div>` : ''}<div class="ent-res-row ${c}"><span>${i + 1}.</span>
+        <span><small>Сіз</small>${esc(fmtAns(i, a))}</span>
+        <span>${r.correct ? `<small>Дұрысы</small>${esc(fmtAns(i, r.correct[i]))}` : ''}</span>
         <span class="pts">${p === max ? '✅' : p > 0 ? '🟡' : '❌'} ${p}/${max}</span></div>`;
     }).join('')}</div>
     <button class="btn btn-light btn-block" type="button" id="ent-done">Материалдарға оралу</button>`;

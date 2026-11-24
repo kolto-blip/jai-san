@@ -88,8 +88,8 @@ export function createStorages(repo) {
       }
       // картинки вопросов ЕНТ (хранятся в ключе материала)
       for (const m of await repo.listMaterials()) {
-        const qs = m.quiz?.ent?.questions;
-        if (!qs?.some((x) => x.img && x.img.storage !== target.name)) continue;
+        const qs = [...(m.quiz?.ent?.questions || []), ...(m.quiz?.ent?.context ? [m.quiz.ent.context] : [])];
+        if (!qs.some((x) => x.img && x.img.storage !== target.name)) continue;
         for (const x of qs) {
           if (!x.img || x.img.storage === target.name || !backends[x.img.storage]) continue;
           const src = backends[x.img.storage];

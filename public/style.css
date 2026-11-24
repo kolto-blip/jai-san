@@ -413,3 +413,24 @@ dialog::backdrop { background: rgb(20 10 50 / .8); }
 .frac > span { padding: 0 .15em; }
 .frac > span:last-child { border-top: .09em solid currentColor; }
 sup { font-size: .7em; line-height: 0; }
+
+/* ЕНТ: разделы формата */
+.ent-section { margin: 10px 0 2px; padding: 6px 12px; border-radius: 10px; background: #fff6dc; color: #8a5a00; font-weight: 900; font-size: 14px; }
+.ent-match { display: grid; gap: 6px; }
+.ent-match > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.ent-match .mi { min-width: 34px; font-weight: 900; color: var(--blue-d); }
+.ent-match.big .bub { width: 52px; height: 52px; font-size: 19px; }
+.ent-match.big .mi { font-size: 19px; min-width: 44px; }
+.ent-optlist, .ent-items { display: grid; gap: 4px; font-size: 17px; padding: 8px 12px; border-radius: 12px; background: var(--soft); }
+.ent-items { background: #eaf5fe; }
+.ent-ctx { border: 2px solid #ffe3a3; border-radius: 14px; padding: 8px 12px; background: #fffaf0; }
+.ent-ctx summary { cursor: pointer; font-weight: 900; color: #8a5a00; }
+.ent-ctx[open] summary { margin-bottom: 8px; }
+.ent-pts { margin-left: auto; font-size: 13px; font-weight: 800; color: var(--muted); }
+.nav-gap { flex-basis: 100%; height: 2px; }
+/* ЕНТ: номера вопросов — одна полоса, чтобы задание было видно сразу */
+.ent-nav { flex-wrap: nowrap; overflow-x: auto; padding: 4px 2px 8px; scrollbar-width: thin; }
+.ent-nav button { flex: 0 0 auto; width: 38px; height: 38px; font-size: 14px; }
+.nav-gap { flex: 0 0 10px; height: auto; }
+#ent-q, .ent-card > * { min-width: 0; }
+.ent-nav { max-width: 100%; }

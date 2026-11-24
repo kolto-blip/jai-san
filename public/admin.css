@@ -237,3 +237,16 @@
 .qed-count label { font-weight: 800; }
 .qed-count input { width: 90px; min-height: 44px; padding: 4px 10px; border-radius: 12px; border: 2px solid var(--line); font-size: 18px; font-weight: 800; }
 .qed-count .hint { flex: 1; min-width: 200px; }
+
+.ent-format-info { font-size: 13px; color: var(--green-d); font-weight: 700; }
+.qe-section { position: sticky; top: 0; z-index: 2; padding: 8px 12px; border-radius: 12px; background: #fff6dc; color: #8a5a00; font-weight: 900; }
+.qe.ctx { border-color: #ffd37a; background: #fffaf0; }
+.qe-match { display: grid; gap: 6px; }
+.qe-match > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.qe-match b { min-width: 40px; color: var(--blue-d); }
+.qe-match label { display: inline-flex !important; align-items: center; gap: 4px; margin: 0 !important; padding: 4px 10px; border-radius: 10px; border: 2px solid var(--line); cursor: pointer; }
+.qe-match label:has(input:checked) { border-color: var(--green); background: #e9fbf1; }
+.qe-items { display: grid; grid-template-columns: auto 1fr; gap: 6px; align-items: center; }
+.qe-items input { min-height: 40px; padding: 4px 10px; border-radius: 10px; border: 2px solid var(--line); font-size: 15px; }
+.qe-section { margin-top: 8px; box-shadow: 0 4px 8px rgb(0 0 0 / .06); }
+.qed-list { padding-top: 0; }
