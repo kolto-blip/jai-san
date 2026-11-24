@@ -259,6 +259,7 @@ function resetForm() {
   syncAllClasses();
   $('#quiz-key').open = false;
   $('#quiz-key').classList.remove('has-key');
+  if (typeof syncEnt === 'function') syncEnt();
   $('#hw-key').open = false;
   $('#hw-key').classList.remove('has-key');
 }
@@ -292,6 +293,13 @@ function editMaterial(m) {
     $('#quiz-open').checked = m.quizKey.open;
     $('#quiz-retry').checked = m.quizKey.retry;
     $('#quiz-show').checked = m.quizKey.show;
+    $('#quiz-ent').checked = Boolean(m.quizKey.ent);
+    if (m.quizKey.ent) {
+      $('#ent-subject').value = m.quizKey.ent.subject;
+      $('#ent-minutes').value = m.quizKey.ent.minutes;
+      $('#ent-letters').value = String(m.quizKey.ent.letters);
+    }
+    syncEnt();
     $('#quiz-key').open = true;
     $('#quiz-key').classList.add('has-key');
   }
@@ -316,7 +324,11 @@ function formMeta() {
 function quizMeta() {
   const answers = $('#quiz-answers').value.split('\n').map((a) => a.trim()).filter(Boolean);
   if (!answers.length) return null;
-  return { answers, open: $('#quiz-open').checked, retry: $('#quiz-retry').checked, show: $('#quiz-show').checked };
+  const q = { answers, open: $('#quiz-open').checked, retry: $('#quiz-retry').checked, show: $('#quiz-show').checked };
+  if ($('#quiz-ent').checked) {
+    q.ent = { subject: $('#ent-subject').value, minutes: Number($('#ent-minutes').value) || 40, letters: Number($('#ent-letters').value) };
+  }
+  return q;
 }
 
 function upload(url, method, file, meta) {
@@ -405,7 +417,7 @@ function renderMaterials() {
         <div><h3>${esc(m.title)}${m.isNew ? '<span class="badge-new">Жаңа</span>' : ''}</h3>
           <div class="meta"><span class="kind-name">${k.name}</span><span>${esc(m.topic)}</span><span>${fmtDate(m.date)}</span>
           ${m.file ? `<span>${esc(m.file.name)} · ${fmtSize(m.file.size)}</span>` : ''}</div>
-          <div class="meta">${tags}${m.hw ? ` <span class="tag tag-hw">📷 фото${m.hw.due ? ' · ' + fmtDate(m.hw.due) + ' дейін' : ''}${m.hw.open ? '' : ' · жабық'}</span>` : ''}${m.quizKey ? ` <span class="tag tag-quiz">✏️ ${m.quizKey.answers.length} есеп${m.quizKey.open ? '' : ' · жабық'}</span>` : ''}</div></div>
+          <div class="meta">${tags}${m.hw ? ` <span class="tag tag-hw">📷 фото${m.hw.due ? ' · ' + fmtDate(m.hw.due) + ' дейін' : ''}${m.hw.open ? '' : ' · жабық'}</span>` : ''}${m.quizKey?.ent ? ` <span class="tag tag-ent">🎯 ЕНТ · ${m.quizKey.ent.minutes} мин</span>` : ''}${m.quizKey ? ` <span class="tag tag-quiz">✏️ ${m.quizKey.answers.length} есеп${m.quizKey.open ? '' : ' · жабық'}</span>` : ''}</div></div>
         <div class="btns">
           <a class="btn btn-light btn-sm" href="${esc(open)}" target="_blank" rel="noopener">Ашу</a>
           ${m.hw ? `<button class="btn btn-blue btn-sm" data-act="subs">📷 Жұмыстар (${m.submissions.total}${m.submissions.unchecked ? ` · ${m.submissions.unchecked} жаңа` : ''})</button>` : ''}
@@ -488,7 +500,7 @@ function renderResults() {
       <td class="l">${esc(r.className)}</td>
       <td class="l">${esc(r.name)}${r.attempt > 1 ? ` <span class="tag">${r.attempt}-әрекет</span>` : ''}</td>
       <td class="score">${r.score}/${r.total}</td>
-      ${r.marks.map((ok, i) => `<td><span class="mk ${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'}</span><small title="${esc(r.answers[i])}">${esc(r.answers[i] || '—')}</small></td>`).join('')}
+      ${r.marks.map((ok, i) => `<td><span class="mk ${ok ? 'ok' : r.points?.[i] > 0 ? 'half' : 'no'}">${ok ? '✓' : r.points?.[i] > 0 ? '½' : '✗'}</span><small title="${esc(r.answers[i])}">${esc(r.answers[i] || '—')}</small></td>`).join('')}
       <td>${fmtTime(r.createdAt)}</td>
       <td><button class="del-res" data-res="${r.id}" title="Жою">🗑</button></td></tr>`).join('')}</tbody>
     ${missingRows(cf)}
@@ -787,6 +799,22 @@ $('#lb-rot').addEventListener('click', () => {
 lb.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') step(-1);
   if (e.key === 'ArrowRight') step(1);
+});
+
+// ЕНТ-режим ключа: подсказки и разумные настройки по умолчанию
+function syncEnt() {
+  const on = $('#quiz-ent').checked;
+  $('#ent-opts').hidden = !on;
+  $('#quiz-hint-ent').hidden = !on;
+  $('#quiz-hint-num').hidden = on;
+  $('#quiz-answers').placeholder = on ? 'B\nD\nACE\nA' : '5\n-3,5\n2; -3\n0,5 | 1/2';
+}
+$('#quiz-ent').addEventListener('change', () => {
+  if ($('#quiz-ent').checked) {
+    $('#quiz-retry').checked = true; // тренировка: можно решать несколько раз
+    $('#quiz-show').checked = true;
+  }
+  syncEnt();
 });
 
 resetForm();

@@ -136,10 +136,20 @@
               <div>
                 <label for="quiz-answers">Әр жолға бір есептің жауабы</label>
                 <textarea id="quiz-answers" rows="6" placeholder="5&#10;-3,5&#10;2; -3&#10;0,5 | 1/2"></textarea>
-                <p class="hint"><b>3,5</b> = 3.5 = 7/2 деп те қабылданады; <b>x = 5</b> = 5.
+                <p class="hint" id="quiz-hint-num"><b>3,5</b> = 3.5 = 7/2 деп те қабылданады; <b>x = 5</b> = 5.
                   Бірнеше түбір — нүктелі үтірмен (<b>2; -3</b>, ретсіз). Бірнеше дұрыс нұсқа — тік сызықпен (<b>0,5 | 1/2</b>).</p>
+                <p class="hint" id="quiz-hint-ent" hidden>ЕНТ: әр жолға дұрыс әріп(тер). <b>B</b> — бір жауап (1 балл);
+                  <b>ACE</b> — бірнеше жауап (2 балл; бір қате болса — 1 балл). Оқушы PDF-тегі сұрақтарға бланкте жауап береді.</p>
               </div>
               <div class="quiz-opts">
+                <label class="pick"><input type="checkbox" id="quiz-ent"><span>🎯 ЕНТ нұсқасы (әріптер, таймер)</span></label>
+                <div class="ent-opts" id="ent-opts" hidden>
+                  <label>Пән <select id="ent-subject">
+                    <option>Математика</option><option>Математикалық сауаттылық</option><option>Алгебра</option><option>Геометрия</option>
+                  </select></label>
+                  <label>Уақыт, мин <input id="ent-minutes" type="number" min="1" max="300" value="40"></label>
+                  <label>Әріптер <select id="ent-letters"><option value="4">A–D</option><option value="5" selected>A–E</option><option value="6">A–F</option><option value="8">A–H</option></select></label>
+                </div>
                 <label class="pick"><input type="checkbox" id="quiz-open" checked><span>Жауап қабылдау ашық</span></label>
                 <label class="pick"><input type="checkbox" id="quiz-retry"><span>Қайта тапсыруға болады</span></label>
                 <label class="pick"><input type="checkbox" id="quiz-show"><span>Кейін дұрыс жауаптарды көрсету</span></label>

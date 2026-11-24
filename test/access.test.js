@@ -519,6 +519,41 @@ function suite(label, makeEnv) {
       await a.req(`/api/admin/materials/${pdf.id}`, { method: 'PUT', json: { hw: null } });
     });
 
+    test('ЕНТ нұсқасы: бланк, баллы ЕНТ, ключ не утекает', async () => {
+      const ent = mats['ЕНТ үлгі нұсқасы — Математика'];
+      assert.ok(ent, 'вариант ЕНТ есть в примере');
+      const s = client(srv.base);
+      await s.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
+      const pub = (await (await s.req('/api/materials')).json()).materials.find((m) => m.id === ent.id);
+      assert.deepEqual(pub.quiz.ent, {
+        subject: 'Математика', minutes: 20, letters: 5,
+        multi: [false, false, false, false, false, false, false, true, true, false],
+      });
+      assert.ok(!JSON.stringify(pub).includes('ACE'), 'ключ не отдаётся ученику');
+      // 1–7 верно (7), №8 одна лишняя буква (1 из 2), №9 верно (2), №10 неверно (0) → 10 из 12
+      const r = await (await s.req(`/api/quiz/${ent.id}`, {
+        method: 'POST', json: { name: 'Тест Оқушы', answers: ['b', 'А', 'B', 'C', 'A', 'C', 'B', 'ACDE', 'CB', 'D'] },
+      })).json();
+      assert.equal(r.score, 10);
+      assert.equal(r.total, 12);
+      assert.deepEqual(r.points, [1, 1, 1, 1, 1, 1, 1, 1, 2, 0]);
+      assert.equal(r.correct[7], 'ACE', 'после сдачи правильные ответы показываются');
+      // повтор разрешён (тренировка)
+      assert.equal((await s.req(`/api/quiz/${ent.id}`, { method: 'POST', json: { name: 'Тест Оқушы', answers: ['B'] } })).status, 200);
+
+      const a = admin();
+      await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      const t = await (await a.req(`/api/admin/materials/${ent.id}/results`)).json();
+      assert.equal(t.results.length, 2);
+      assert.deepEqual(t.results[0].points, [1, 1, 1, 1, 1, 1, 1, 1, 2, 0]);
+      // неверный ключ ЕНТ не принимается
+      const bad = await a.req(`/api/admin/materials/${ent.id}`, {
+        method: 'PUT', json: { quiz: { answers: ['B', 'X'], ent: { minutes: 20, letters: 5 } } },
+      });
+      assert.equal(bad.status, 400);
+      await a.req(`/api/admin/materials/${ent.id}/results`, { method: 'DELETE' });
+    });
+
     test('подбор кода класса блокируется по IP', async () => {
       const s = client(srv.base);
       let last;

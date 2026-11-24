@@ -10,7 +10,8 @@ const store = {
 };
 
 function show(id) {
-  for (const s of ['join', 'who', 'pin', 'main', 'loading']) $('#' + s).hidden = s !== id;
+  for (const s of ['join', 'who', 'pin', 'main', 'ent', 'loading']) $('#' + s).hidden = s !== id;
+  document.body.classList.toggle('ent-mode', id === 'ent'); // во время теста — ничего лишнего
 }
 
 async function join(code) {
@@ -190,8 +191,10 @@ function render(data) {
 
 function renderList() {
   const q = state.q.toLocaleLowerCase('kk');
+  const isEnt = (m) => Boolean(m.quiz?.ent);
   const items = state.materials.filter(
-    (m) => (state.kind === 'all' || m.kind === state.kind) && (!q || m.title.toLocaleLowerCase('kk').includes(q)),
+    (m) => (state.kind === 'all' || (state.kind === 'ent' ? isEnt(m) : m.kind === state.kind && !isEnt(m))) &&
+      (!q || m.title.toLocaleLowerCase('kk').includes(q)),
   );
   const list = $('#list');
   if (!items.length) {
@@ -201,13 +204,15 @@ function renderList() {
   }
   // группировка по темам: порядок — по самому свежему материалу темы
   const groups = new Map();
+  const ENT = '🎯 ЕНТ нұсқалары';
+  if (items.some(isEnt)) groups.set(ENT, []); // варианты ЕНТ — отдельный раздел сверху
   for (const m of items) {
-    const t = m.topic || 'Басқа';
+    const t = isEnt(m) ? ENT : m.topic || 'Басқа';
     if (!groups.has(t)) groups.set(t, []);
     groups.get(t).push(m);
   }
   list.innerHTML = [...groups]
-    .map(([topic, ms]) => `<h2 class="topic">${esc(topic)} <span class="count">${ms.length}</span></h2>
+    .map(([topic, ms]) => `<h2 class="topic ${topic === ENT ? 'topic-ent' : ''}">${esc(topic)} <span class="count">${ms.length}</span></h2>
       <div class="grid">${ms.map(card).join('')}</div>`)
     .join('');
 }
@@ -229,7 +234,7 @@ function card(m) {
     action = `<a class="btn" href="${esc(m.url)}" target="_blank" rel="noopener noreferrer">Ашу ↗</a>`;
   }
   const extra = m.file ? `<span>${esc(m.file.ext.toUpperCase())} · ${fmtSize(m.file.size)}</span>` : '';
-  return `<article class="card mat" data-kind="${m.kind}">
+  return `<article class="card mat" data-kind="${m.kind}" ${m.quiz?.ent ? 'data-ent' : ''}>
     <div class="kicon" aria-hidden="true">${k.icon}</div>
     <div>
       <h3>${esc(m.title)}${m.isNew ? '<span class="badge-new">Жаңа</span>' : ''}</h3>
@@ -280,6 +285,7 @@ const local = {
 
 function quizBlock(m) {
   if (!m.quiz) return '';
+  if (m.quiz.ent) return entBlock(m);
   const done = state.student ? m.quiz.done : local.get('quiz:' + m.id);
   if (done) {
     const again = m.quiz.retry && m.quiz.open ? `<button class="btn btn-light btn-sm" type="button" data-quiz="${m.id}">Қайта</button>` : '';
@@ -652,6 +658,168 @@ document.addEventListener('click', async (e) => {
   }
   await offline.refresh();
 });
+
+// ---------- ЕНТ нұсқалары ----------
+const LETTERS = 'ABCDEFGH';
+const E = { mat: null, ans: [], timer: null, end: 0 };
+const entKey = (m, k) => `ent:${m.id}:${state.student?.name || ''}:${k}`;
+
+function entBlock(m) {
+  const e = m.quiz.ent;
+  const done = state.student ? m.quiz.done : local.get('quiz:' + m.id);
+  const running = local.get(entKey(m, 'end'));
+  const info = `<div class="ent-info"><span>${esc(e.subject)}</span><span>${m.quiz.count} сұрақ</span><span>⏱ ${e.minutes} мин</span>
+    ${done ? `<span class="best">Нәтиже: ${done.score}/${done.total} балл</span>` : ''}</div>`;
+  if (!m.quiz.open) return info + '<div class="quiz-done">🔒 Жабық</div>';
+  if (running && running > Date.now()) return info + `<button class="btn btn-ent" type="button" data-ent="${m.id}">▶ Жалғастыру</button>`;
+  if (done && !m.quiz.retry) return info;
+  return info + `<button class="btn btn-ent" type="button" data-ent="${m.id}">${done ? '🔁 Қайта тапсыру' : '▶ Бастау'}</button>`;
+}
+
+$('#list').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ent]');
+  if (b && b.tagName === 'BUTTON') openEnt(state.materials.find((x) => String(x.id) === b.dataset.ent));
+});
+
+function openEnt(m) {
+  E.mat = m;
+  const e = m.quiz.ent;
+  // продолжение начатой попытки (после перезагрузки страницы)
+  let end = local.get(entKey(m, 'end'));
+  if (!end || end <= Date.now()) {
+    end = Date.now() + e.minutes * 60_000;
+    local.set(entKey(m, 'end'), end);
+    local.set(entKey(m, 'ans'), []);
+  }
+  E.end = end;
+  E.ans = local.get(entKey(m, 'ans')) || [];
+  $('#ent-title').textContent = m.title;
+  $('#ent-sub').textContent = `${e.subject} · ${m.quiz.count} сұрақ · ${e.minutes} минут`;
+  $('#ent-pdf').hidden = !m.href;
+  if (m.href) $('#ent-pdf').href = m.href;
+  $('#ent-name').value = state.student ? state.student.name : local.get('studentName') || '';
+  $('#ent-name').hidden = $('#ent-name-label').hidden = Boolean(state.student);
+  $('#ent-error').textContent = '';
+  renderSheet();
+  $('#ent-body').hidden = false;
+  $('#ent-result').hidden = true;
+  $('#ent-finish').hidden = false;
+  show('ent');
+  scrollTo(0, 0);
+  clearInterval(E.timer);
+  tick();
+  E.timer = setInterval(tick, 1000);
+}
+
+function renderSheet() {
+  const e = E.mat.quiz.ent;
+  $('#ent-sheet').innerHTML = Array.from({ length: E.mat.quiz.count }, (_, i) => {
+    const a = E.ans[i] || '';
+    return `<div class="ent-row ${a ? 'done' : ''}" data-q="${i}"><span class="ent-no">${i + 1}.</span>
+      ${[...LETTERS.slice(0, e.letters)].map((L) => `<button class="bub" type="button" data-l="${L}" aria-pressed="${a.includes(L)}" aria-label="${i + 1}-сұрақ, ${L}">${L}</button>`).join('')}
+      ${e.multi[i] ? '<span class="ent-multi">бірнеше жауап</span>' : ''}</div>`;
+  }).join('');
+}
+
+$('#ent-sheet').addEventListener('click', (e) => {
+  const b = e.target.closest('.bub');
+  if (!b) return;
+  const i = Number(b.closest('[data-q]').dataset.q);
+  const multi = E.mat.quiz.ent.multi[i];
+  let a = E.ans[i] || '';
+  const L = b.dataset.l;
+  if (multi) a = a.includes(L) ? a.replace(L, '') : [...a + L].sort().join('');
+  else a = a === L ? '' : L;
+  E.ans[i] = a;
+  local.set(entKey(E.mat, 'ans'), E.ans);
+  const row = b.closest('[data-q]');
+  row.classList.toggle('done', Boolean(a));
+  row.querySelectorAll('.bub').forEach((x) => x.setAttribute('aria-pressed', String(a.includes(x.dataset.l))));
+});
+
+function tick() {
+  const left = Math.max(0, Math.round((E.end - Date.now()) / 1000));
+  const el = $('#ent-timer');
+  el.textContent = `⏱ ${String(Math.floor(left / 60)).padStart(2, '0')}:${String(left % 60).padStart(2, '0')}`;
+  el.classList.toggle('low', left <= 300 && left > 60);
+  el.classList.toggle('crit', left <= 60);
+  if (left === 0) {
+    clearInterval(E.timer);
+    submitEnt(true);
+  }
+}
+
+$('#ent-back').addEventListener('click', () => {
+  clearInterval(E.timer);
+  toast('Уақыт жүріп жатыр — «Жалғастыру» басып оралыңыз');
+  show('main');
+  renderList();
+});
+// имя сохраняем сразу: попытку могут продолжить после перезагрузки
+$('#ent-name').addEventListener('input', (e) => local.set('studentName', e.target.value.trim()));
+$('#ent-finish').addEventListener('click', () => submitEnt(false));
+$('#ent-submit').addEventListener('click', () => submitEnt(false));
+
+async function submitEnt(auto) {
+  const m = E.mat;
+  const name = $('#ent-name').value.trim();
+  const err = $('#ent-error');
+  if (!state.student && name.length < 2) {
+    err.textContent = 'Аты-жөніңізді жазыңыз';
+    $('#ent-name').focus();
+    if (auto) {
+      // время вышло, а имени нет — ждём имя, ответы не теряем
+      toast('Уақыт бітті. Атыңызды жазып, «Аяқтау» басыңыз.', true);
+    }
+    return;
+  }
+  const answers = Array.from({ length: m.quiz.count }, (_, i) => E.ans[i] || '');
+  const empty = answers.filter((a) => !a).length;
+  if (!auto && empty && !(await confirmBox(`${empty} сұраққа жауап белгіленбеді. Аяқтайсыз ба?`, 'Иә, аяқтау'))) return;
+  if (!auto && !empty && !(await confirmBox('Жауаптарды жіберіп, тестті аяқтайсыз ба?', 'Иә, аяқтау'))) return;
+  if (answers.every((a) => !a)) answers[0] = '-'; // пустой бланк тоже засчитываем (0 баллов)
+  try {
+    const r = await api(`/api/quiz/${m.id}`, { method: 'POST', body: { name, answers } });
+    clearInterval(E.timer);
+    local.set(entKey(m, 'end'), 0);
+    if (!state.student) {
+      local.set('studentName', name);
+      local.set('quiz:' + m.id, { score: r.score, total: r.total });
+    } else m.quiz.done = { score: r.score, total: r.total };
+    showEntResult(r, answers, auto);
+  } catch (e2) {
+    if (e2.data?.needLogin) return showWho('Қайта кіріңіз: атыңызды таңдап, PIN енгізіңіз.');
+    err.textContent = e2.message;
+    if (auto) toast(e2.message, true);
+  }
+}
+
+function showEntResult(r, answers, auto) {
+  const pct = Math.round((r.score / r.total) * 100);
+  const cls = pct >= 80 ? '' : pct >= 50 ? 'mid' : 'low';
+  $('#ent-result').innerHTML = `<div class="quiz-score">${auto ? '<div class="hint">⏱ Уақыт бітті — жауаптар жіберілді</div>' : ''}
+      <div class="big ${cls}">${r.score}/${r.total}</div><div><b>балл · ${pct}%</b></div></div>
+    <div class="ent-sheet">${answers.map((a, i) => {
+      const p = r.points[i];
+      const max = E.mat.quiz.ent.multi[i] ? 2 : 1;
+      const c = p === max ? '' : p > 0 ? 'half' : 'bad';
+      return `<div class="ent-res-row ${c}"><span>${i + 1}.</span>
+        <span><small>Сіз</small>${esc(a.replace('-', '') || '—')}</span>
+        <span>${r.correct ? `<small>Дұрысы</small>${esc(r.correct[i])}` : ''}</span>
+        <span class="pts">${p === max ? '✅' : p > 0 ? '🟡' : '❌'} ${p}/${max}</span></div>`;
+    }).join('')}</div>
+    <button class="btn btn-light btn-block" type="button" id="ent-done">Материалдарға оралу</button>`;
+  $('#ent-body').hidden = true;
+  $('#ent-finish').hidden = true;
+  $('#ent-result').hidden = false;
+  $('#ent-timer').textContent = '🎯 Нәтиже';
+  $('#ent-timer').classList.remove('low', 'crit');
+  scrollTo(0, 0);
+  $('#ent-done').addEventListener('click', () => {
+    show('main');
+    renderList();
+  });
+}
 
 initInstall(document.querySelector('.wrap'));
 load();

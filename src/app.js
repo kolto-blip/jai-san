@@ -9,7 +9,7 @@ import { openRepo } from './db/index.js';
 import { createStorages } from './storage/index.js';
 import { createAuth, adminMode } from './auth.js';
 import { FailureLimiter } from './ratelimit.js';
-import { grade, nameKey } from './grade.js';
+import { grade, nameKey, entLetters } from './grade.js';
 import { aiConfig, checkHomework, AiError } from './ai.js';
 import {
   HttpError, readBody, readJson, sendJson, parseCookies, cookie, clientIp, generateCode, normalizeCode,
@@ -130,6 +130,10 @@ export async function createApp() {
     if (m.quiz?.answers?.length) {
       // сами ответы ученикам не отдаём
       out.quiz = { count: m.quiz.answers.length, open: m.quiz.open, retry: m.quiz.retry };
+      if (m.quiz.ent) {
+        // какие вопросы с несколькими ответами — это написано и в самом варианте; сами буквы не отдаём
+        out.quiz.ent = { ...m.quiz.ent, multi: m.quiz.answers.map((a) => entLetters(a).length > 1) };
+      }
     }
     return out;
   }
@@ -174,7 +178,24 @@ export async function createApp() {
     if (!answers.length) return null;
     if (answers.length > 50) throw new HttpError(400, 'Жауап кілтінде 50-ден көп жол болмауы керек');
     if (answers.some((a) => !a)) throw new HttpError(400, 'Жауап кілтінде бос жол бар');
-    return { answers, open: q.open !== false, retry: Boolean(q.retry), show: Boolean(q.show) };
+    const out = { answers, open: q.open !== false, retry: Boolean(q.retry), show: Boolean(q.show) };
+    if (q.ent) {
+      const letters = Math.min(8, Math.max(4, Number(q.ent.letters) || 5));
+      const allowed = 'ABCDEFGH'.slice(0, letters);
+      out.answers = answers.map((a, i) => {
+        const l = entLetters(a);
+        if (!l || [...l].some((c) => !allowed.includes(c))) {
+          throw new HttpError(400, `ЕНТ кілтінің ${i + 1}-жолы: тек ${allowed[0]}–${allowed[letters - 1]} әріптері (мысалы: B немесе ACE)`);
+        }
+        return l;
+      });
+      out.ent = {
+        letters,
+        minutes: Math.min(300, Math.max(1, Number(q.ent.minutes) || 40)),
+        subject: String(q.ent.subject || 'Математика').trim().slice(0, 60),
+      };
+    }
+    return out;
   }
 
   // Общие поля материала из формы учителя.
@@ -285,7 +306,7 @@ export async function createApp() {
       for (const m of list) {
         const r = latest[m.id];
         if (m.quiz && r) {
-          const g = grade(r.answers, byId[m.id].quiz.answers);
+          const g = grade(r.answers, byId[m.id].quiz);
           m.quiz.done = { score: g.score, total: g.total };
         }
       }
@@ -758,7 +779,7 @@ export async function createApp() {
     }
     submitLimiter.fail(ip); // считаем каждую отправку
     await repo.createResult({ materialId: m.id, classId: cls.id, name, nameKey: key, answers, studentId: a.student?.id ?? null });
-    const g = grade(answers, m.quiz.answers);
+    const g = grade(answers, m.quiz);
     sendJson(res, 200, { ...g, correct: m.quiz.show ? m.quiz.answers : undefined });
   });
 
@@ -777,7 +798,7 @@ export async function createApp() {
     // ключ мог измениться — оцениваем заново при каждом просмотре
     const results = (await repo.listResults(m.id)).map((r) => ({
       id: r.id, name: students[r.studentId]?.name || r.name, className: names[r.classId] || '—', classId: r.classId,
-      studentId: r.studentId, answers: r.answers, createdAt: r.createdAt, ...grade(r.answers, key),
+      studentId: r.studentId, answers: r.answers, createdAt: r.createdAt, ...grade(r.answers, m.quiz || key),
     }));
     // номер попытки для одного и того же ученика
     const seen = {};

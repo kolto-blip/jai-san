@@ -82,10 +82,34 @@
         <button class="chip" data-kind="pres" aria-pressed="false"><span class="dot"></span>Презентация</button>
         <button class="chip" data-kind="video" aria-pressed="false"><span class="dot"></span>Видео</button>
         <button class="chip" data-kind="link" aria-pressed="false"><span class="dot"></span>Сілтеме</button>
+        <button class="chip" data-kind="ent" aria-pressed="false"><span class="dot"></span>🎯 ЕНТ</button>
       </div>
       <input id="search" class="search" type="search" placeholder="Атауы бойынша іздеу" aria-label="Іздеу">
 
       <div id="list"></div>
+    </section>
+
+    <!-- ЕНТ: бланк ответов с таймером -->
+    <section id="ent" hidden>
+      <div class="ent-top">
+        <button class="btn btn-ghost btn-sm" id="ent-back" type="button">← Артқа</button>
+        <div class="ent-timer" id="ent-timer" aria-live="polite">⏱ 00:00</div>
+        <button class="btn btn-green btn-sm" id="ent-finish" type="button">Аяқтау ✓</button>
+      </div>
+      <div class="card ent-card" id="ent-body">
+        <div class="ent-head">
+          <div class="ent-badge">🎯 ЕНТ</div>
+          <div><h2 id="ent-title"></h2><div class="hint" id="ent-sub"></div></div>
+        </div>
+        <a class="btn btn-coral btn-block" id="ent-pdf" href="#" target="_blank" rel="noopener">📄 Сұрақтарды ашу (PDF)</a>
+        <label class="quiz-label" for="ent-name" id="ent-name-label">Аты-жөніңіз</label>
+        <input id="ent-name" class="quiz-input quiz-name" maxlength="60" autocomplete="name" placeholder="Мысалы: Әлия Серікқызы">
+        <p class="hint">Жауап парағы: дұрыс әріпті басыңыз. <b>«Бірнеше жауап»</b> деп белгіленген сұрақтарда бірнеше әріп таңдауға болады. Уақыт біткенде жауаптар өзі жіберіледі.</p>
+        <div class="ent-sheet" id="ent-sheet"></div>
+        <div class="form-error" id="ent-error" role="alert"></div>
+        <button class="btn btn-green btn-block" id="ent-submit" type="button">Аяқтау және тексеру ✓</button>
+      </div>
+      <div class="card ent-card" id="ent-result" hidden></div>
     </section>
 
     <div id="loading" class="empty"><div class="big-emoji">⏳</div>Жүктелуде…</div>

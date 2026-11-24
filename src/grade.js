@@ -51,7 +51,40 @@ export function isCorrect(given, key) {
     .some((alt) => matchOne(given, alt));
 }
 
-export function grade(answers, key) {
+// Буквы ответа ЕНТ: «a c», «А,С» (кириллица), «CA» → «AC»
+const CYR = { А: 'A', В: 'B', С: 'C', Е: 'E', Н: 'H', К: 'K', М: 'M', О: 'O', Р: 'P', Т: 'T', Х: 'X' };
+export function entLetters(s) {
+  const up = String(s ?? '').toUpperCase().replace(/[АВСЕНКМОРТХ]/g, (c) => CYR[c]);
+  return [...new Set(up.replace(/[^A-H]/g, ''))].sort().join('');
+}
+
+// Баллы ЕНТ за вопрос: один правильный ответ — 1 балл;
+// несколько правильных — 2 балла за всё верно, 1 балл за одну ошибку (лишняя или пропущенная буква).
+export function entPoints(given, key) {
+  const g = entLetters(given);
+  const k = entLetters(key);
+  if (k.length <= 1) return { points: g === k && g !== '' ? 1 : 0, max: 1 };
+  if (!g) return { points: 0, max: 2 };
+  const gs = new Set(g);
+  const ks = new Set(k);
+  let diff = 0;
+  for (const c of gs) if (!ks.has(c)) diff++;
+  for (const c of ks) if (!gs.has(c)) diff++;
+  return { points: diff === 0 ? 2 : diff === 1 ? 1 : 0, max: 2 };
+}
+
+// quiz — объект ключа ({ answers, ent? }) или просто массив ответов
+export function grade(answers, quiz) {
+  const key = Array.isArray(quiz) ? quiz : quiz.answers;
+  if (!Array.isArray(quiz) && quiz.ent) {
+    const pts = key.map((k, i) => entPoints(answers[i], k));
+    return {
+      marks: pts.map((p) => p.points === p.max),
+      points: pts.map((p) => p.points),
+      score: pts.reduce((x, p) => x + p.points, 0),
+      total: pts.reduce((x, p) => x + p.max, 0),
+    };
+  }
   const marks = key.map((k, i) => isCorrect(answers[i], k));
   return { marks, score: marks.filter(Boolean).length, total: key.length };
 }
