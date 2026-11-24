@@ -191,7 +191,7 @@ export async function createApp() {
       });
       out.ent = {
         letters,
-        minutes: Math.min(300, Math.max(1, Number(q.ent.minutes) || 40)),
+        minutes: Math.min(300, Math.max(0, Math.round(Number(q.ent.minutes) || 0))), // 0 — без таймера
         subject: String(q.ent.subject || 'Математика').trim().slice(0, 60),
       };
     }

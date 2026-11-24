@@ -296,7 +296,7 @@ function editMaterial(m) {
     $('#quiz-ent').checked = Boolean(m.quizKey.ent);
     if (m.quizKey.ent) {
       $('#ent-subject').value = m.quizKey.ent.subject;
-      $('#ent-minutes').value = m.quizKey.ent.minutes;
+      $('#ent-minutes').value = m.quizKey.ent.minutes || '';
       $('#ent-letters').value = String(m.quizKey.ent.letters);
     }
     syncEnt();
@@ -326,7 +326,7 @@ function quizMeta() {
   if (!answers.length) return null;
   const q = { answers, open: $('#quiz-open').checked, retry: $('#quiz-retry').checked, show: $('#quiz-show').checked };
   if ($('#quiz-ent').checked) {
-    q.ent = { subject: $('#ent-subject').value, minutes: Number($('#ent-minutes').value) || 40, letters: Number($('#ent-letters').value) };
+    q.ent = { subject: $('#ent-subject').value, minutes: Number($('#ent-minutes').value) || 0, letters: Number($('#ent-letters').value) };
   }
   return q;
 }
@@ -417,7 +417,7 @@ function renderMaterials() {
         <div><h3>${esc(m.title)}${m.isNew ? '<span class="badge-new">Жаңа</span>' : ''}</h3>
           <div class="meta"><span class="kind-name">${k.name}</span><span>${esc(m.topic)}</span><span>${fmtDate(m.date)}</span>
           ${m.file ? `<span>${esc(m.file.name)} · ${fmtSize(m.file.size)}</span>` : ''}</div>
-          <div class="meta">${tags}${m.hw ? ` <span class="tag tag-hw">📷 фото${m.hw.due ? ' · ' + fmtDate(m.hw.due) + ' дейін' : ''}${m.hw.open ? '' : ' · жабық'}</span>` : ''}${m.quizKey?.ent ? ` <span class="tag tag-ent">🎯 ЕНТ · ${m.quizKey.ent.minutes} мин</span>` : ''}${m.quizKey ? ` <span class="tag tag-quiz">✏️ ${m.quizKey.answers.length} есеп${m.quizKey.open ? '' : ' · жабық'}</span>` : ''}</div></div>
+          <div class="meta">${tags}${m.hw ? ` <span class="tag tag-hw">📷 фото${m.hw.due ? ' · ' + fmtDate(m.hw.due) + ' дейін' : ''}${m.hw.open ? '' : ' · жабық'}</span>` : ''}${m.quizKey?.ent ? ` <span class="tag tag-ent">🎯 ЕНТ${m.quizKey.ent.minutes ? ` · ${m.quizKey.ent.minutes} мин` : ''}</span>` : ''}${m.quizKey ? ` <span class="tag tag-quiz">✏️ ${m.quizKey.answers.length} есеп${m.quizKey.open ? '' : ' · жабық'}</span>` : ''}</div></div>
         <div class="btns">
           <a class="btn btn-light btn-sm" href="${esc(open)}" target="_blank" rel="noopener">Ашу</a>
           ${m.hw ? `<button class="btn btn-blue btn-sm" data-act="subs">📷 Жұмыстар (${m.submissions.total}${m.submissions.unchecked ? ` · ${m.submissions.unchecked} жаңа` : ''})</button>` : ''}

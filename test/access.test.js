@@ -526,7 +526,7 @@ function suite(label, makeEnv) {
       await s.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
       const pub = (await (await s.req('/api/materials')).json()).materials.find((m) => m.id === ent.id);
       assert.deepEqual(pub.quiz.ent, {
-        subject: 'Математика', minutes: 20, letters: 5,
+        subject: 'Математика', minutes: 0, letters: 5,
         multi: [false, false, false, false, false, false, false, true, true, false],
       });
       assert.ok(!JSON.stringify(pub).includes('ACE'), 'ключ не отдаётся ученику');

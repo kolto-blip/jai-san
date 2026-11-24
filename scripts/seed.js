@@ -44,7 +44,7 @@ export async function seed(repo, storages, log = console.log) {
     { title: 'ЕНТ үлгі нұсқасы — Математика', topic: 'ЕНТ', date: daysAgo(0), allClasses: true,
       ...(await fileFields('ЕНТ_үлгі_нұсқа_математика.pdf')),
       quiz: { answers: ['B', 'A', 'B', 'C', 'A', 'C', 'B', 'ACE', 'BC', 'B'], open: true, retry: true, show: true,
-        ent: { subject: 'Математика', minutes: 20, letters: 5 } } },
+        ent: { subject: 'Математика', minutes: 0, letters: 5 } } },
     { title: 'Дәрежеге кіріспе (Khan Academy)', topic: 'Дәреже', date: daysAgo(4), allClasses: true, kind: 'video',
       url: 'https://www.youtube.com/watch?v=XZRQhkii0h0' },
     { title: 'Desmos — функция графигін салу', topic: 'Функциялар', date: daysAgo(20), kind: 'link',

@@ -668,7 +668,7 @@ function entBlock(m) {
   const e = m.quiz.ent;
   const done = state.student ? m.quiz.done : local.get('quiz:' + m.id);
   const running = local.get(entKey(m, 'end'));
-  const info = `<div class="ent-info"><span>${esc(e.subject)}</span><span>${m.quiz.count} сұрақ</span><span>⏱ ${e.minutes} мин</span>
+  const info = `<div class="ent-info"><span>${esc(e.subject)}</span><span>${m.quiz.count} сұрақ</span>${e.minutes ? `<span>⏱ ${e.minutes} мин</span>` : ''}
     ${done ? `<span class="best">Нәтиже: ${done.score}/${done.total} балл</span>` : ''}</div>`;
   if (!m.quiz.open) return info + '<div class="quiz-done">🔒 Жабық</div>';
   if (running && running > Date.now()) return info + `<button class="btn btn-ent" type="button" data-ent="${m.id}">▶ Жалғастыру</button>`;
@@ -687,14 +687,14 @@ function openEnt(m) {
   // продолжение начатой попытки (после перезагрузки страницы)
   let end = local.get(entKey(m, 'end'));
   if (!end || end <= Date.now()) {
-    end = Date.now() + e.minutes * 60_000;
+    end = e.minutes ? Date.now() + e.minutes * 60_000 : Number.MAX_SAFE_INTEGER; // без таймера
     local.set(entKey(m, 'end'), end);
     local.set(entKey(m, 'ans'), []);
   }
   E.end = end;
   E.ans = local.get(entKey(m, 'ans')) || [];
   $('#ent-title').textContent = m.title;
-  $('#ent-sub').textContent = `${e.subject} · ${m.quiz.count} сұрақ · ${e.minutes} минут`;
+  $('#ent-sub').textContent = `${e.subject} · ${m.quiz.count} сұрақ${e.minutes ? ` · ${e.minutes} минут` : ''}`;
   $('#ent-pdf').hidden = !m.href;
   if (m.href) $('#ent-pdf').href = m.href;
   $('#ent-name').value = state.student ? state.student.name : local.get('studentName') || '';
@@ -707,8 +707,13 @@ function openEnt(m) {
   show('ent');
   scrollTo(0, 0);
   clearInterval(E.timer);
-  tick();
-  E.timer = setInterval(tick, 1000);
+  $('#ent-timer').classList.remove('low', 'crit');
+  if (e.minutes) {
+    tick();
+    E.timer = setInterval(tick, 1000);
+  } else {
+    $('#ent-timer').textContent = '🎯 ЕНТ';
+  }
 }
 
 function renderSheet() {
@@ -751,7 +756,7 @@ function tick() {
 
 $('#ent-back').addEventListener('click', () => {
   clearInterval(E.timer);
-  toast('Уақыт жүріп жатыр — «Жалғастыру» басып оралыңыз');
+  toast(E.mat.quiz.ent.minutes ? 'Уақыт жүріп жатыр — «Жалғастыру» басып оралыңыз' : 'Жауаптар сақталды — «Жалғастыру» басып оралыңыз');
   show('main');
   renderList();
 });
