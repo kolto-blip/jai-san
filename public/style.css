@@ -379,3 +379,37 @@ dialog::backdrop { background: rgb(20 10 50 / .8); }
 .ent-res-row small { display: block; font-size: 11px; color: var(--muted); font-weight: 700; }
 .ent-res-row .pts { text-align: right; }
 .ent-mode .install-bar { display: none; }
+
+/* ЕНТ: один вопрос на экране */
+.ent-nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.ent-nav button { width: 40px; height: 40px; border-radius: 10px; border: 2px solid var(--line); background: #fff; font-weight: 900; cursor: pointer; color: var(--ink); }
+.ent-nav button.done { background: #e6ddff; border-color: #cdbdff; }
+.ent-nav button.cur { border-color: var(--purple); box-shadow: 0 3px 0 var(--purple-d); }
+.ent-qcard { display: grid; gap: 12px; margin-top: 14px; }
+.ent-qno { display: flex; align-items: center; gap: 8px; font-weight: 900; color: var(--purple-d); font-size: 18px; }
+.ent-qno .ent-multi { margin: 0; font-size: 13px; flex-basis: auto; }
+.ent-qimg { max-width: 100%; border-radius: 12px; border: 1px solid var(--line); background: #fff; }
+.ent-qtext { font-size: 19px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ent-opts { display: grid; gap: 8px; }
+.ent-opt { display: flex; align-items: center; gap: 12px; padding: 10px 12px; min-height: 56px; border-radius: 16px; text-align: left;
+  border: 2px solid var(--line); background: #fff; cursor: pointer; font-size: 17px; color: var(--ink); }
+.ent-opt .L { flex: 0 0 38px; height: 38px; border-radius: 50%; display: grid; place-items: center; font-weight: 900;
+  border: 2px solid #c9bff0; }
+.ent-opt[aria-pressed='true'] { border-color: var(--purple); background: #f3eeff; }
+.ent-opt[aria-pressed='true'] .L { background: var(--purple); border-color: var(--purple-d); color: #fff; }
+.ent-step { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.ent-res-row { cursor: default; }
+
+.ent-opts.compact { display: flex; flex-wrap: wrap; gap: 10px; }
+.ent-opts.compact .ent-opt { padding: 6px; min-height: 0; border-radius: 50%; }
+.ent-opts.compact .ent-opt .L { flex-basis: 48px; width: 48px; height: 48px; font-size: 19px; border: 0; }
+.ent-opts.compact .ent-opt { width: 60px; height: 60px; padding: 0; justify-content: center; border-width: 2px; }
+.ent-opts.compact .ent-opt .L { flex: 0 0 auto; width: auto; height: auto; background: none !important; color: inherit !important; font-size: 21px; }
+.ent-opts.compact .ent-opt[aria-pressed='true'] { background: var(--purple); border-color: var(--purple-d); color: #fff; box-shadow: 0 3px 0 var(--purple-d); }
+@media (max-width: 380px) { .ent-opts.compact .ent-opt { width: 52px; height: 52px; } }
+
+/* Дроби: числитель над знаменателем */
+.frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; margin: 0 .12em; line-height: 1.1; font-size: .9em; }
+.frac > span { padding: 0 .15em; }
+.frac > span:last-child { border-top: .09em solid currentColor; }
+sup { font-size: .7em; line-height: 0; }

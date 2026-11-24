@@ -148,3 +148,14 @@ function iosHelp() {
   dlg.addEventListener('close', () => dlg.remove());
   dlg.showModal();
 }
+
+// ---------- Математическая запись ----------
+// «3/4» → дробь «три над четыре», «x^2» → x². Учитель пишет обычным текстом, ученик видит как в учебнике.
+const FRAC_PART = String.raw`(?:−|-)?(?:\d+(?:[.,]\d+)?|[a-zA-Zа-яА-ЯәіңғүұқөһӘІҢҒҮҰҚӨҺ]\w{0,2}|\([^()]{1,24}\))`;
+const FRAC_RE = new RegExp(`(${FRAC_PART})\\/(${FRAC_PART})`, 'g');
+function mathHtml(text) {
+  const strip = (p) => (p.startsWith('(') && p.endsWith(')') ? p.slice(1, -1) : p);
+  return esc(text)
+    .replace(/\^(\(([^()]{1,24})\)|−?-?[\w.]{1,6})/g, (_, all, inner) => `<sup>${inner ?? all}</sup>`)
+    .replace(FRAC_RE, (_, a, b) => `<span class="frac" role="math" aria-label="${a} бөлу ${b}"><span>${strip(a)}</span><span>${strip(b)}</span></span>`);
+}

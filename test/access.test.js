@@ -525,11 +525,14 @@ function suite(label, makeEnv) {
       const s = client(srv.base);
       await s.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
       const pub = (await (await s.req('/api/materials')).json()).materials.find((m) => m.id === ent.id);
-      assert.deepEqual(pub.quiz.ent, {
+      const { questions, ...entInfo } = pub.quiz.ent;
+      assert.deepEqual(entInfo, {
         subject: 'Математика', minutes: 0, letters: 5,
         multi: [false, false, false, false, false, false, false, true, true, false],
       });
       assert.ok(!JSON.stringify(pub).includes('ACE'), 'ключ не отдаётся ученику');
+      assert.equal(questions.length, 10, 'вопросы для показа по одному');
+      assert.deepEqual(questions[0].options, ['4/10', '11/12', '5/6', '1', '7/12']);
       // 1–7 верно (7), №8 одна лишняя буква (1 из 2), №9 верно (2), №10 неверно (0) → 10 из 12
       const r = await (await s.req(`/api/quiz/${ent.id}`, {
         method: 'POST', json: { name: 'Тест Оқушы', answers: ['b', 'А', 'B', 'C', 'A', 'C', 'B', 'ACDE', 'CB', 'D'] },
@@ -552,6 +555,44 @@ function suite(label, makeEnv) {
       });
       assert.equal(bad.status, 400);
       await a.req(`/api/admin/materials/${ent.id}/results`, { method: 'DELETE' });
+    });
+
+    test('ЕНТ: картинки вопросов — загрузка, доступ, удаление', async () => {
+      const a = admin();
+      await a.req('/api/admin/login', { method: 'POST', json: { pin: PIN } });
+      const ov = await (await a.req('/api/admin/overview')).json();
+      const c9 = ov.classes.find((c) => c.name === '9А');
+      const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.from('скриншот')]);
+      const s = client(srv.base);
+      assert.equal((await s.req('/api/admin/qimages', { method: 'POST', body: png, headers: { 'x-req': '1' } })).status, 401, 'ученик не загружает');
+      assert.equal((await a.req('/api/admin/qimages', { method: 'POST', body: Buffer.from('<svg/>') })).status, 400);
+      const up = await (await a.req('/api/admin/qimages', { method: 'POST', body: png })).json();
+      assert.match(up.url, /^\/qimg\/qi-[0-9a-f]{32}$/);
+      const mat = await (await a.req('/api/admin/materials', {
+        method: 'POST',
+        json: {
+          title: 'ЕНТ сурет', topic: 'ЕНТ', type: 'link', url: 'https://example.com/', classIds: [c9.id],
+          quiz: { answers: ['B'], retry: true, show: true, ent: { letters: 5, questions: [{ text: '', options: [], img: up.img }] } },
+        },
+      })).json();
+      assert.equal(mat.id > 0, true);
+      // ученик 9А видит картинку, ученик 7Ә — нет
+      const s9 = client(srv.base);
+      assert.equal((await s9.req('/api/join', { method: 'POST', json: { code: 'MAT909' } })).status, 200);
+      const pub = (await (await s9.req('/api/materials')).json()).materials.find((m) => m.id === mat.id);
+      assert.equal(pub.quiz.ent.questions[0].img, up.url);
+      const img = await s9.req(up.url);
+      assert.equal(img.status, 200);
+      assert.equal(img.headers.get('content-type'), 'image/png');
+      const s7 = client(srv.base);
+      await s7.req('/api/join', { method: 'POST', json: { code: codes['7Ә'] } });
+      assert.equal((await s7.req(up.url)).status, 404);
+      // вопрос без текста и без картинки не принимается
+      const bad = await a.req(`/api/admin/materials/${mat.id}`, { method: 'PUT', json: { quiz: { answers: ['B'], ent: { letters: 5, questions: [{ text: '' }] } } } });
+      assert.equal(bad.status, 400);
+      // удаление материала удаляет и картинку
+      await a.req(`/api/admin/materials/${mat.id}`, { method: 'DELETE' });
+      assert.equal((await s9.req(up.url)).status, 404);
     });
 
     test('подбор кода класса блокируется по IP', async () => {

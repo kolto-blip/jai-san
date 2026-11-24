@@ -259,6 +259,7 @@ function resetForm() {
   syncAllClasses();
   $('#quiz-key').open = false;
   $('#quiz-key').classList.remove('has-key');
+  S.questions = [];
   if (typeof syncEnt === 'function') syncEnt();
   $('#hw-key').open = false;
   $('#hw-key').classList.remove('has-key');
@@ -298,6 +299,7 @@ function editMaterial(m) {
       $('#ent-subject').value = m.quizKey.ent.subject;
       $('#ent-minutes').value = m.quizKey.ent.minutes || '';
       $('#ent-letters').value = String(m.quizKey.ent.letters);
+      S.questions = structuredClone(m.quizKey.ent.questions || []);
     }
     syncEnt();
     $('#quiz-key').open = true;
@@ -327,6 +329,7 @@ function quizMeta() {
   const q = { answers, open: $('#quiz-open').checked, retry: $('#quiz-retry').checked, show: $('#quiz-show').checked };
   if ($('#quiz-ent').checked) {
     q.ent = { subject: $('#ent-subject').value, minutes: Number($('#ent-minutes').value) || 0, letters: Number($('#ent-letters').value) };
+    if (S.questions.length) q.ent.questions = S.questions.map(({ text, options, img }) => ({ text, options, img }));
   }
   return q;
 }
@@ -370,8 +373,15 @@ $('#mat-form').addEventListener('submit', async (e) => {
     if (S.type === 'file') {
       if (ed && !S.file) await api(`/api/admin/materials/${ed.id}`, { method: 'PUT', body: meta });
       else if (!S.file) throw new Error('Файлды таңдаңыз');
-      else if (ed) await upload(`/api/admin/materials/${ed.id}/file`, 'PUT', S.file, meta);
-      else await upload('/api/admin/materials/upload', 'POST', S.file, meta);
+      else {
+        // вопросы ЕНТ большие для заголовка запроса — отправляем их отдельно после файла
+        const big = meta.quiz?.ent?.questions;
+        const headMeta = big ? { ...meta, quiz: undefined } : meta;
+        const saved = ed
+          ? await upload(`/api/admin/materials/${ed.id}/file`, 'PUT', S.file, headMeta)
+          : await upload('/api/admin/materials/upload', 'POST', S.file, headMeta);
+        if (big || (ed && meta.quiz !== undefined)) await api(`/api/admin/materials/${saved.id}`, { method: 'PUT', body: meta });
+      }
     } else {
       const body = { ...meta, type: S.type, url: $('#url').value.trim() };
       if (!body.url) throw new Error('Сілтемені қойыңыз');
@@ -808,6 +818,8 @@ function syncEnt() {
   $('#quiz-hint-ent').hidden = !on;
   $('#quiz-hint-num').hidden = on;
   $('#quiz-answers').placeholder = on ? 'B\nD\nACE\nA' : '5\n-3,5\n2; -3\n0,5 | 1/2';
+  $('#qed-open').textContent = S.questions?.length ? `📝 Сұрақтар: ${S.questions.length} (бөлек экранда) — өзгерту` : '📝 Сұрақтарды бөлек экранға енгізу';
+  $('#quiz-answers').readOnly = Boolean(on && S.questions?.length); // ключ собирается из галочек
 }
 $('#quiz-ent').addEventListener('change', () => {
   if ($('#quiz-ent').checked) {
@@ -815,6 +827,180 @@ $('#quiz-ent').addEventListener('change', () => {
     $('#quiz-show').checked = true;
   }
   syncEnt();
+});
+
+// ---------- Редактор вопросов ЕНТ ----------
+const qed = $('#qed-dlg');
+let qFocus = 0;
+
+function qLetters() {
+  return 'ABCDEFGH'.slice(0, Number($('#ent-letters').value) || 5);
+}
+
+$('#qed-open').addEventListener('click', () => {
+  const L = qLetters();
+  // вопросов ещё нет — создаём по ключу из поля (если он уже вписан)
+  if (!S.questions.length) {
+    const keys = $('#quiz-answers').value.split('\n').map((x) => x.trim().toUpperCase()).filter(Boolean);
+    S.questions = (keys.length ? keys : ['']).map((k) => ({ text: '', options: Array(L.length).fill(''), img: null, key: k.replace(/[^A-H]/g, '') }));
+  }
+  for (const q of S.questions) {
+    q.options = Array.from({ length: L.length }, (_, j) => q.options?.[j] || '');
+    if (q.key === undefined) q.key = '';
+  }
+  const keys = $('#quiz-answers').value.split('\n').map((x) => x.trim().toUpperCase());
+  S.questions.forEach((q, i) => (q.key ||= (keys[i] || '').replace(/[^A-H]/g, '')));
+  $('#qed-error').textContent = '';
+  renderQed();
+  qed.showModal();
+});
+
+function renderQed() {
+  const L = qLetters();
+  $('#qed-list').innerHTML = S.questions.map((q, i) => `<div class="qe ${i === qFocus ? 'focus' : ''}" data-qi="${i}">
+    <div class="qe-head"><b>${i + 1}-сұрақ</b>
+      <button class="btn btn-light btn-sm" type="button" data-qa="up" ${i ? '' : 'disabled'} aria-label="Жоғары">↑</button>
+      <button class="btn btn-coral btn-sm" type="button" data-qa="del" aria-label="Жою">🗑</button></div>
+    <div class="qe-img" tabindex="0" data-qa="img">
+      ${q.img ? `<img src="/qimg/${q.img.key}" alt=""><button class="btn btn-light btn-sm rm" type="button" data-qa="rmimg">✕</button>`
+        : '<span>📋 Скриншотты осында қойыңыз (<b>Ctrl+V</b>), сүйреңіз немесе <u>таңдаңыз</u></span>'}
+    </div>
+    <textarea rows="2" data-qf="text" placeholder="Сұрақ мәтіні (сурет болса — міндетті емес). Бөлшек: 3/4, дәреже: x^2">${esc(q.text)}</textarea>
+    <div class="qe-prev" data-prev ${/[/^]/.test(q.text) ? '' : 'hidden'}>Оқушы көреді: <span>${mathHtml(q.text)}</span></div>
+    <div class="qe-opts">${[...L].map((c, j) => `<div class="qe-opt ${q.key.includes(c) ? 'ok' : ''}">
+      <label title="Дұрыс жауап"><input type="checkbox" data-ok="${c}" ${q.key.includes(c) ? 'checked' : ''}><b>${c}</b></label>
+      <input type="text" data-qo="${j}" value="${esc(q.options[j])}" placeholder="${c} нұсқасы (міндетті емес)"></div>`).join('')}</div>
+  </div>`).join('');
+}
+
+function qIndex(el) {
+  return Number(el.closest('[data-qi]').dataset.qi);
+}
+
+$('#qed-list').addEventListener('input', (e) => {
+  const q = S.questions[qIndex(e.target)];
+  if (e.target.dataset.qf === 'text') {
+    q.text = e.target.value;
+    const prev = e.target.parentElement.querySelector('[data-prev]');
+    prev.hidden = !/[/^]/.test(q.text);
+    prev.querySelector('span').innerHTML = mathHtml(q.text);
+  }
+  if (e.target.dataset.qo !== undefined) q.options[Number(e.target.dataset.qo)] = e.target.value;
+});
+$('#qed-list').addEventListener('change', (e) => {
+  if (!e.target.dataset.ok) return;
+  const q = S.questions[qIndex(e.target)];
+  const c = e.target.dataset.ok;
+  q.key = e.target.checked ? [...new Set(q.key + c)].sort().join('') : q.key.replace(c, '');
+  e.target.closest('.qe-opt').classList.toggle('ok', e.target.checked);
+});
+$('#qed-list').addEventListener('focusin', (e) => {
+  const card = e.target.closest('[data-qi]');
+  if (!card) return;
+  qFocus = qIndex(card);
+  document.querySelectorAll('.qe').forEach((x) => x.classList.toggle('focus', x === card));
+});
+$('#qed-list').addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-qa]');
+  if (!b) return;
+  const i = qIndex(b);
+  if (b.dataset.qa === 'del') {
+    if (!(await confirmBox(`${i + 1}-сұрақ жойылады.`))) return;
+    S.questions.splice(i, 1);
+    if (!S.questions.length) S.questions.push(blankQ());
+  } else if (b.dataset.qa === 'up') {
+    [S.questions[i - 1], S.questions[i]] = [S.questions[i], S.questions[i - 1]];
+  } else if (b.dataset.qa === 'rmimg') {
+    S.questions[i].img = null;
+  } else if (b.dataset.qa === 'img') {
+    qFocus = i;
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = 'image/*';
+    inp.onchange = () => inp.files[0] && setQImage(i, inp.files[0]);
+    inp.click();
+    return;
+  }
+  renderQed();
+});
+
+function blankQ() {
+  return { text: '', options: Array(qLetters().length).fill(''), img: null, key: '' };
+}
+$('#qed-add').addEventListener('click', () => {
+  S.questions.push(blankQ());
+  qFocus = S.questions.length - 1;
+  renderQed();
+  $('#qed-list').lastElementChild.scrollIntoView({ behavior: 'smooth' });
+});
+$('#qed-clear').addEventListener('click', async () => {
+  if (!(await confirmBox('Барлық сұрақтар өшіріледі (PDF + бланк режиміне оралады).', 'Иә, өшіру'))) return;
+  S.questions = [];
+  qed.close();
+  syncEnt();
+});
+$('#qed-close').addEventListener('click', () => qed.close());
+
+// вставка скриншота: Ctrl+V — в выбранный вопрос
+document.addEventListener('paste', (e) => {
+  if (!qed.open) return;
+  const item = [...(e.clipboardData?.items || [])].find((x) => x.type.startsWith('image/'));
+  if (!item) return;
+  e.preventDefault();
+  setQImage(qFocus, item.getAsFile());
+});
+$('#qed-list').addEventListener('dragover', (e) => {
+  const z = e.target.closest('.qe-img');
+  if (z) { e.preventDefault(); z.classList.add('over'); }
+});
+$('#qed-list').addEventListener('dragleave', (e) => e.target.closest('.qe-img')?.classList.remove('over'));
+$('#qed-list').addEventListener('drop', (e) => {
+  const z = e.target.closest('.qe-img');
+  if (!z) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const f = e.dataTransfer.files[0];
+  if (f && f.type.startsWith('image/')) setQImage(qIndex(z), f);
+});
+
+// большие картинки уменьшаем (длинная сторона до 1600 px), скриншоты оставляем чёткими
+async function shrinkImage(file) {
+  if (file.size <= 900 * 1024 && /png|jpeg|webp/.test(file.type)) return file;
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * k);
+  c.height = Math.round(bmp.height * k);
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise((r) => c.toBlob(r, 'image/jpeg', 0.85));
+}
+
+async function setQImage(i, file) {
+  try {
+    const blob = await shrinkImage(file);
+    const res = await fetch('/api/admin/qimages', { method: 'POST', headers: { 'X-Req': '1', 'Content-Type': 'application/octet-stream' }, body: blob });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Сурет жүктелмеді');
+    S.questions[i].img = data.img;
+    renderQed();
+    toast(`${i + 1}-сұраққа сурет қойылды`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+}
+
+$('#qed-save').addEventListener('click', () => {
+  const bad = S.questions.findIndex((q) => !q.key);
+  if (bad >= 0) return ($('#qed-error').textContent = `${bad + 1}-сұраққа дұрыс жауапты (✓) белгілеңіз`);
+  const empty = S.questions.findIndex((q) => !q.text.trim() && !q.img);
+  if (empty >= 0) return ($('#qed-error').textContent = `${empty + 1}-сұрақ бос: сурет қойыңыз немесе мәтін жазыңыз`);
+  $('#quiz-answers').value = S.questions.map((q) => q.key).join('\n');
+  qed.close();
+  syncEnt();
+  toast(`${S.questions.length} сұрақ дайын. «Сақтау» басуды ұмытпаңыз.`);
 });
 
 resetForm();

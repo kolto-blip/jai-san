@@ -356,7 +356,7 @@ function showQuizResult(r, answers) {
   $('#quiz-result').innerHTML = `
     <div class="quiz-score"><div class="big ${cls}">${r.score}/${r.total}</div><div><b>${praise}</b></div></div>
     <div class="quiz-marks">${r.marks.map((ok, i) => `<div class="quiz-mark ${ok ? '' : 'bad'}">№${i + 1} ${ok ? '✅' : '❌'}
-      <small>Сіз: ${esc(answers[i] || '—')}${!ok && r.correct ? ` · Дұрысы: ${esc(r.correct[i])}` : ''}</small></div>`).join('')}</div>
+      <small>Сіз: ${answers[i] ? mathHtml(answers[i]) : '—'}${!ok && r.correct ? ` · Дұрысы: ${mathHtml(r.correct[i].split('|')[0].trim())}` : ''}</small></div>`).join('')}</div>
     <div class="row">${quizMat.quiz.retry ? '<button class="btn btn-blue" type="button" id="quiz-again">Қайта тапсыру</button>' : ''}
       <button class="btn btn-light" type="button" id="quiz-ok">Жабу</button></div>`;
   $('#quiz-body').hidden = true;
@@ -700,7 +700,14 @@ function openEnt(m) {
   $('#ent-name').value = state.student ? state.student.name : local.get('studentName') || '';
   $('#ent-name').hidden = $('#ent-name-label').hidden = Boolean(state.student);
   $('#ent-error').textContent = '';
-  renderSheet();
+  E.paged = Boolean(e.questions?.length);
+  E.cur = Math.min(local.get(entKey(m, 'cur')) || 0, m.quiz.count - 1);
+  $('#ent-sheet').hidden = E.paged;
+  $('#ent-q').hidden = !E.paged;
+  $('#ent-submit').hidden = E.paged;
+  $('#ent-sheet-hint').hidden = E.paged;
+  if (E.paged) renderQuestion();
+  else renderSheet();
   $('#ent-body').hidden = false;
   $('#ent-result').hidden = true;
   $('#ent-finish').hidden = false;
@@ -740,6 +747,62 @@ $('#ent-sheet').addEventListener('click', (e) => {
   const row = b.closest('[data-q]');
   row.classList.toggle('done', Boolean(a));
   row.querySelectorAll('.bub').forEach((x) => x.setAttribute('aria-pressed', String(a.includes(x.dataset.l))));
+});
+
+// ---- один вопрос на экране ----
+function renderQuestion() {
+  const m = E.mat;
+  const e = m.quiz.ent;
+  const i = E.cur;
+  const q = e.questions[i];
+  const a = E.ans[i] || '';
+  $('#ent-nav').innerHTML = Array.from({ length: m.quiz.count }, (_, k) =>
+    `<button type="button" data-go="${k}" class="${E.ans[k] ? 'done' : ''} ${k === i ? 'cur' : ''}" aria-label="${k + 1}-сұрақ">${k + 1}</button>`).join('');
+  $('#ent-qcard').innerHTML = `
+    <div class="ent-qno">${i + 1} / ${m.quiz.count}${e.multi[i] ? '<span class="ent-multi">бірнеше жауап</span>' : ''}</div>
+    ${q.img ? `<img class="ent-qimg" src="${q.img}" alt="${i + 1}-сұрақ">` : ''}
+    ${q.text ? `<div class="ent-qtext">${mathHtml(q.text)}</div>` : ''}
+    <div class="ent-opts ${q.options.some(Boolean) ? '' : 'compact'}">${[...LETTERS.slice(0, e.letters)].map((L, j) =>
+      `<button class="ent-opt" type="button" data-l="${L}" aria-pressed="${a.includes(L)}" aria-label="${L}"><span class="L">${L}</span>${q.options[j] ? `<span>${mathHtml(q.options[j])}</span>` : ''}</button>`).join('')}</div>`;
+  $('#ent-prev').disabled = i === 0;
+  const last = i === m.quiz.count - 1;
+  $('#ent-next').textContent = last ? 'Аяқтау ✓' : 'Келесі →';
+  $('#ent-next').classList.toggle('btn-green', last);
+  $('#ent-next').classList.toggle('btn-blue', !last);
+  local.set(entKey(m, 'cur'), i);
+}
+
+function goQuestion(k) {
+  E.cur = Math.max(0, Math.min(E.mat.quiz.count - 1, k));
+  renderQuestion();
+  // прокрутить к вопросу, не пряча его под липкой шапкой с таймером
+  const top = $('#ent-q').getBoundingClientRect().top + scrollY - $('.ent-top').offsetHeight - 8;
+  scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+}
+
+$('#ent-qcard').addEventListener('click', (e) => {
+  const b = e.target.closest('.ent-opt');
+  if (!b) return;
+  const i = E.cur;
+  const L = b.dataset.l;
+  let a = E.ans[i] || '';
+  if (E.mat.quiz.ent.multi[i]) a = a.includes(L) ? a.replace(L, '') : [...a + L].sort().join('');
+  else a = a === L ? '' : L;
+  E.ans[i] = a;
+  local.set(entKey(E.mat, 'ans'), E.ans);
+  renderQuestion();
+});
+$('#ent-nav').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-go]');
+  if (b) goQuestion(Number(b.dataset.go));
+});
+$('#ent-prev').addEventListener('click', () => goQuestion(E.cur - 1));
+$('#ent-next').addEventListener('click', () => (E.cur === E.mat.quiz.count - 1 ? submitEnt(false) : goQuestion(E.cur + 1)));
+// стрелки на клавиатуре (ноутбук)
+document.addEventListener('keydown', (e) => {
+  if ($('#ent').hidden || !E.paged || $('#ent-q').hidden || e.target.matches('input, textarea')) return;
+  if (e.key === 'ArrowRight') goQuestion(E.cur + 1);
+  if (e.key === 'ArrowLeft') goQuestion(E.cur - 1);
 });
 
 function tick() {
@@ -787,6 +850,7 @@ async function submitEnt(auto) {
     const r = await api(`/api/quiz/${m.id}`, { method: 'POST', body: { name, answers } });
     clearInterval(E.timer);
     local.set(entKey(m, 'end'), 0);
+    local.set(entKey(m, 'cur'), 0);
     if (!state.student) {
       local.set('studentName', name);
       local.set('quiz:' + m.id, { score: r.score, total: r.total });

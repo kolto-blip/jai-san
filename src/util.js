@@ -32,8 +32,8 @@ export function readBody(req, limit) {
   });
 }
 
-export async function readJson(req) {
-  const buf = await readBody(req, 100 * 1024);
+export async function readJson(req, limit = 100 * 1024) {
+  const buf = await readBody(req, limit);
   if (!buf.length) return {};
   try {
     return JSON.parse(buf.toString('utf8'));

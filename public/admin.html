@@ -148,6 +148,7 @@
                     <option>Математика</option><option>Математикалық сауаттылық</option><option>Алгебра</option><option>Геометрия</option>
                   </select></label>
                   <label>Таймер, мин <input id="ent-minutes" type="number" min="0" max="300" placeholder="Таймерсіз"></label>
+                  <button class="btn btn-purple btn-sm span-all" type="button" id="qed-open">📝 Сұрақтарды бөлек экранға енгізу</button>
                   <label>Әріптер <select id="ent-letters"><option value="4">A–D</option><option value="5" selected>A–E</option><option value="6">A–F</option><option value="8">A–H</option></select></label>
                 </div>
                 <label class="pick"><input type="checkbox" id="quiz-open" checked><span>Жауап қабылдау ашық</span></label>
@@ -201,6 +202,24 @@
         <button class="btn btn-purple" value="ok" type="submit">Сақтау</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="qed-dlg">
+    <div class="modal res">
+      <div class="modal-head">
+        <h2>📝 ЕНТ сұрақтары — әр сұрақ бөлек экранда</h2>
+        <button class="btn btn-coral btn-sm" id="qed-close" type="button">Жабу ✕</button>
+      </div>
+      <p class="hint">Әр сұраққа: <b>скриншот</b> (PDF-тен немесе кітаптан сұрақты қиып алып, суретке <b>Ctrl+V</b>) және/немесе мәтін.
+        Нұсқалар суретте көрінсе, оларды жазу міндетті емес. Дұрыс жауаптарға <b>✓</b> қойыңыз — кілт өзі құралады.</p>
+      <div class="qed-list" id="qed-list"></div>
+      <div class="form-error" id="qed-error" role="alert"></div>
+      <div class="qed-foot">
+        <button class="btn btn-blue" type="button" id="qed-add">➕ Сұрақ қосу</button>
+        <button class="btn btn-light" type="button" id="qed-clear">Барлығын өшіру</button>
+        <button class="btn btn-green" type="button" id="qed-save">✓ Дайын</button>
+      </div>
+    </div>
   </dialog>
 
   <dialog id="stu-dlg">

@@ -86,6 +86,20 @@ export function createStorages(repo) {
         await src.del(f.storageKey).catch(() => {});
         moved++;
       }
+      // картинки вопросов ЕНТ (хранятся в ключе материала)
+      for (const m of await repo.listMaterials()) {
+        const qs = m.quiz?.ent?.questions;
+        if (!qs?.some((x) => x.img && x.img.storage !== target.name)) continue;
+        for (const x of qs) {
+          if (!x.img || x.img.storage === target.name || !backends[x.img.storage]) continue;
+          const src = backends[x.img.storage];
+          await target.put(x.img.key, await src.get(x.img.key));
+          await src.del(x.img.key).catch(() => {});
+          x.img.storage = target.name;
+          moved++;
+        }
+        await repo.updateMaterial(m.id, { quiz: m.quiz });
+      }
       if (moved) log(`  → барлығы тасымалданды (оқушы фотолары да): ${moved}`);
       return moved;
     },

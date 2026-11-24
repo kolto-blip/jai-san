@@ -104,8 +104,17 @@
         <a class="btn btn-coral btn-block" id="ent-pdf" href="#" target="_blank" rel="noopener">📄 Сұрақтарды ашу (PDF)</a>
         <label class="quiz-label" for="ent-name" id="ent-name-label">Аты-жөніңіз</label>
         <input id="ent-name" class="quiz-input quiz-name" maxlength="60" autocomplete="name" placeholder="Мысалы: Әлия Серікқызы">
-        <p class="hint">Жауап парағы: дұрыс әріпті басыңыз. <b>«Бірнеше жауап»</b> деп белгіленген сұрақтарда бірнеше әріп таңдауға болады. Жауаптар телефонда сақталады — кейін жалғастыруға болады.</p>
+        <p class="hint" id="ent-sheet-hint">Жауап парағы: дұрыс әріпті басыңыз. <b>«Бірнеше жауап»</b> деп белгіленген сұрақтарда бірнеше әріп таңдауға болады. Жауаптар телефонда сақталады — кейін жалғастыруға болады.</p>
         <div class="ent-sheet" id="ent-sheet"></div>
+        <!-- режим «один вопрос на экране» -->
+        <div id="ent-q" hidden>
+          <div class="ent-nav" id="ent-nav" role="group" aria-label="Сұрақтар"></div>
+          <div class="ent-qcard" id="ent-qcard"></div>
+          <div class="ent-step">
+            <button class="btn btn-light" type="button" id="ent-prev">← Алдыңғы</button>
+            <button class="btn btn-blue" type="button" id="ent-next">Келесі →</button>
+          </div>
+        </div>
         <div class="form-error" id="ent-error" role="alert"></div>
         <button class="btn btn-green btn-block" id="ent-submit" type="button">Аяқтау және тексеру ✓</button>
       </div>

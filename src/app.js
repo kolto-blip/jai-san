@@ -133,6 +133,11 @@ export async function createApp() {
       if (m.quiz.ent) {
         // какие вопросы с несколькими ответами — это написано и в самом варианте; сами буквы не отдаём
         out.quiz.ent = { ...m.quiz.ent, multi: m.quiz.answers.map((a) => entLetters(a).length > 1) };
+        if (m.quiz.ent.questions) {
+          out.quiz.ent.questions = m.quiz.ent.questions.map((x) => ({
+            text: x.text, options: x.options, img: x.img ? `/qimg/${x.img.key}` : null,
+          }));
+        }
       }
     }
     return out;
@@ -194,6 +199,18 @@ export async function createApp() {
         minutes: Math.min(300, Math.max(0, Math.round(Number(q.ent.minutes) || 0))), // 0 — без таймера
         subject: String(q.ent.subject || 'Математика').trim().slice(0, 60),
       };
+      // Вопросы для показа по одному на экране (необязательно; без них — PDF + бланк)
+      if (Array.isArray(q.ent.questions) && q.ent.questions.length) {
+        if (q.ent.questions.length !== out.answers.length) throw new HttpError(400, 'Сұрақтар саны мен кілт саны сәйкес емес');
+        out.ent.questions = q.ent.questions.map((x, i) => {
+          const img = x?.img && /^qi-[0-9a-f]{32}$/.test(x.img.key) && ['db', 'local', 'b2'].includes(x.img.storage)
+            ? { key: x.img.key, storage: x.img.storage } : null;
+          const text = String(x?.text || '').trim().slice(0, 3000);
+          if (!text && !img) throw new HttpError(400, `${i + 1}-сұрақ бос: мәтін жазыңыз немесе сурет қойыңыз`);
+          const options = Array.from({ length: letters }, (_, j) => String(x?.options?.[j] || '').trim().slice(0, 400));
+          return { text, img, options };
+        });
+      }
     }
     return out;
   }
@@ -509,7 +526,7 @@ export async function createApp() {
 
   route('POST', /^\/api\/admin\/materials$/, async (req, res) => {
     requireAdmin(req);
-    const fields = await materialFields(await readJson(req), { isFile: false });
+    const fields = await materialFields(await readJson(req, 2 * 1024 * 1024), { isFile: false });
     sendJson(res, 201, adminMaterial(await repo.createMaterial(fields)));
   });
 
@@ -524,8 +541,10 @@ export async function createApp() {
     requireAdmin(req);
     const existing = await repo.getMaterial(Number(id));
     if (!existing) throw new HttpError(404, 'Материал табылмады');
-    const fields = await materialFields(await readJson(req), { isFile: Boolean(existing.storage), existing });
-    sendJson(res, 200, adminMaterial(await repo.updateMaterial(existing.id, fields)));
+    const fields = await materialFields(await readJson(req, 2 * 1024 * 1024), { isFile: Boolean(existing.storage), existing });
+    const updated = await repo.updateMaterial(existing.id, fields);
+    await dropUnusedQuizImages(existing.quiz, updated.quiz);
+    sendJson(res, 200, adminMaterial(updated));
   });
 
   // Заменить файл у существующего материала (или превратить ссылку в файл)
@@ -548,6 +567,7 @@ export async function createApp() {
       await repo.deleteMaterial(m.id);
       await removeFile(m);
       await removeStored(photos);
+      await dropUnusedQuizImages(m.quiz, null);
     }
     sendJson(res, 200, { ok: true });
   });
@@ -555,6 +575,55 @@ export async function createApp() {
   // ---------- Фото домашних работ ----------
   const MAX_PHOTOS = 6;
   const MAX_PHOTO_BYTES = 6 * 1024 * 1024;
+
+  // ---------- Картинки вопросов ЕНТ ----------
+  const quizImages = (quiz) => (quiz?.ent?.questions || []).map((x) => x.img).filter(Boolean);
+
+  async function dropUnusedQuizImages(oldQuiz, newQuiz) {
+    const keep = new Set(quizImages(newQuiz).map((x) => x.key));
+    await removeStored(quizImages(oldQuiz).filter((x) => !keep.has(x.key)).map((x) => ({ storage: x.storage, storageKey: x.key })));
+  }
+
+  // Учитель загружает картинку вопроса (скриншот); ссылка на неё попадёт в ключ при сохранении материала
+  route('POST', /^\/api\/admin\/qimages$/, async (req, res) => {
+    requireAdmin(req);
+    const buf = await readBody(req, 3 * 1024 * 1024);
+    const mime = imageMime(buf);
+    if (!mime) throw new HttpError(400, 'Тек сурет (JPEG, PNG, WebP)');
+    const key = 'qi-' + crypto.randomBytes(16).toString('hex');
+    await storages.active.put(key, buf);
+    sendJson(res, 201, { img: { key, storage: storages.active.name }, url: `/qimg/${key}` });
+  });
+
+  // Картинку вопроса видит учитель и ученики классов, которым доступен этот вариант
+  route('GET', /^\/qimg\/(qi-[0-9a-f]{32})$/, async (req, res, [key]) => {
+    let img = null;
+    const find = (list) => {
+      for (const m of list) for (const x of quizImages(m.quiz)) if (x.key === key) return x;
+      return null;
+    };
+    if (auth.isAdmin(req)) img = find(await repo.listMaterials());
+    else {
+      const a = await access(req);
+      if (a.ok) img = find(await repo.listMaterialsForClass(a.cls.id));
+    }
+    if (!img) {
+      // только что загруженная, ещё не сохранённая в материале картинка — видна учителю
+      if (auth.isAdmin(req)) img = { key, storage: storages.active.name };
+      else throw new HttpError(404, 'Сурет табылмады');
+    }
+    let buf;
+    try {
+      buf = await storages.get(img.storage).get(img.key);
+    } catch {
+      throw new HttpError(404, 'Сурет табылмады');
+    }
+    res.writeHead(200, {
+      'Content-Type': imageMime(buf) || 'application/octet-stream', 'Content-Length': buf.length,
+      'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff',
+    });
+    res.end(buf);
+  });
 
   function imageMime(buf) {
     if (buf.length > 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return 'image/jpeg';
